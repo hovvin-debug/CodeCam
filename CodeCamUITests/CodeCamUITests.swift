@@ -1,13 +1,13 @@
 //
-//  CamCodeUITests.swift
-//  CamCodeUITests
+//  CodeCamUITests.swift
+//  CodeCamUITests
 //
 //  Created by lai lin on 2026/9/4.
 //
 
 import XCTest
 
-final class CamCodeUITests: XCTestCase {
+final class CodeCamUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

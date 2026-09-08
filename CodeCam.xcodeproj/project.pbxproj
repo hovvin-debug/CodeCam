@@ -12,37 +12,50 @@
 			containerPortal = 34EA2519304ACBCA0091D138 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 34EA2520304ACBCA0091D138;
-			remoteInfo = CamCode;
+			remoteInfo = CodeCam;
 		};
 		34EA2539304ACBCC0091D138 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 34EA2519304ACBCA0091D138 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 34EA2520304ACBCA0091D138;
-			remoteInfo = CamCode;
+			remoteInfo = CodeCam;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		34EA2521304ACBCA0091D138 /* CamCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CamCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		34EA252E304ACBCC0091D138 /* CamCodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CamCodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		34EA2538304ACBCC0091D138 /* CamCodeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CamCodeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		34EA2521304ACBCA0091D138 /* CodeCam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodeCam.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		34EA252E304ACBCC0091D138 /* CodeCamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodeCamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		34EA2538304ACBCC0091D138 /* CodeCamUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodeCamUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		34EA2550304ACBCA0091D138 /* Exceptions for "CodeCam" folder in "CodeCam" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 34EA2520304ACBCA0091D138 /* CodeCam */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		34EA2523304ACBCA0091D138 /* CamCode */ = {
+		34EA2523304ACBCA0091D138 /* CodeCam */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = CamCode;
+			exceptions = (
+				34EA2550304ACBCA0091D138 /* Exceptions for "CodeCam" folder in "CodeCam" target */,
+			);
+			path = CodeCam;
 			sourceTree = "<group>";
 		};
-		34EA2531304ACBCC0091D138 /* CamCodeTests */ = {
+		34EA2531304ACBCC0091D138 /* CodeCamTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = CamCodeTests;
+			path = CodeCamTests;
 			sourceTree = "<group>";
 		};
-		34EA253B304ACBCC0091D138 /* CamCodeUITests */ = {
+		34EA253B304ACBCC0091D138 /* CodeCamUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = CamCodeUITests;
+			path = CodeCamUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -75,9 +88,9 @@
 		34EA2518304ACBCA0091D138 = {
 			isa = PBXGroup;
 			children = (
-				34EA2523304ACBCA0091D138 /* CamCode */,
-				34EA2531304ACBCC0091D138 /* CamCodeTests */,
-				34EA253B304ACBCC0091D138 /* CamCodeUITests */,
+				34EA2523304ACBCA0091D138 /* CodeCam */,
+				34EA2531304ACBCC0091D138 /* CodeCamTests */,
+				34EA253B304ACBCC0091D138 /* CodeCamUITests */,
 				34EA2522304ACBCA0091D138 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -85,9 +98,9 @@
 		34EA2522304ACBCA0091D138 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				34EA2521304ACBCA0091D138 /* CamCode.app */,
-				34EA252E304ACBCC0091D138 /* CamCodeTests.xctest */,
-				34EA2538304ACBCC0091D138 /* CamCodeUITests.xctest */,
+				34EA2521304ACBCA0091D138 /* CodeCam.app */,
+				34EA252E304ACBCC0091D138 /* CodeCamTests.xctest */,
+				34EA2538304ACBCC0091D138 /* CodeCamUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,9 +108,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		34EA2520304ACBCA0091D138 /* CamCode */ = {
+		34EA2520304ACBCA0091D138 /* CodeCam */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 34EA2542304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCode" */;
+			buildConfigurationList = 34EA2542304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCam" */;
 			buildPhases = (
 				34EA251D304ACBCA0091D138 /* Sources */,
 				34EA251E304ACBCA0091D138 /* Frameworks */,
@@ -108,18 +121,18 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				34EA2523304ACBCA0091D138 /* CamCode */,
+				34EA2523304ACBCA0091D138 /* CodeCam */,
 			);
-			name = CamCode;
+			name = CodeCam;
 			packageProductDependencies = (
 			);
-			productName = CamCode;
-			productReference = 34EA2521304ACBCA0091D138 /* CamCode.app */;
+			productName = CodeCam;
+			productReference = 34EA2521304ACBCA0091D138 /* CodeCam.app */;
 			productType = "com.apple.product-type.application";
 		};
-		34EA252D304ACBCC0091D138 /* CamCodeTests */ = {
+		34EA252D304ACBCC0091D138 /* CodeCamTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 34EA2545304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCodeTests" */;
+			buildConfigurationList = 34EA2545304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCamTests" */;
 			buildPhases = (
 				34EA252A304ACBCC0091D138 /* Sources */,
 				34EA252B304ACBCC0091D138 /* Frameworks */,
@@ -131,18 +144,18 @@
 				34EA2530304ACBCC0091D138 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				34EA2531304ACBCC0091D138 /* CamCodeTests */,
+				34EA2531304ACBCC0091D138 /* CodeCamTests */,
 			);
-			name = CamCodeTests;
+			name = CodeCamTests;
 			packageProductDependencies = (
 			);
-			productName = CamCodeTests;
-			productReference = 34EA252E304ACBCC0091D138 /* CamCodeTests.xctest */;
+			productName = CodeCamTests;
+			productReference = 34EA252E304ACBCC0091D138 /* CodeCamTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		34EA2537304ACBCC0091D138 /* CamCodeUITests */ = {
+		34EA2537304ACBCC0091D138 /* CodeCamUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 34EA2548304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCodeUITests" */;
+			buildConfigurationList = 34EA2548304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCamUITests" */;
 			buildPhases = (
 				34EA2534304ACBCC0091D138 /* Sources */,
 				34EA2535304ACBCC0091D138 /* Frameworks */,
@@ -154,13 +167,13 @@
 				34EA253A304ACBCC0091D138 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				34EA253B304ACBCC0091D138 /* CamCodeUITests */,
+				34EA253B304ACBCC0091D138 /* CodeCamUITests */,
 			);
-			name = CamCodeUITests;
+			name = CodeCamUITests;
 			packageProductDependencies = (
 			);
-			productName = CamCodeUITests;
-			productReference = 34EA2538304ACBCC0091D138 /* CamCodeUITests.xctest */;
+			productName = CodeCamUITests;
+			productReference = 34EA2538304ACBCC0091D138 /* CodeCamUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -186,7 +199,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 34EA251C304ACBCA0091D138 /* Build configuration list for PBXProject "CamCode" */;
+			buildConfigurationList = 34EA251C304ACBCA0091D138 /* Build configuration list for PBXProject "CodeCam" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -200,9 +213,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				34EA2520304ACBCA0091D138 /* CamCode */,
-				34EA252D304ACBCC0091D138 /* CamCodeTests */,
-				34EA2537304ACBCC0091D138 /* CamCodeUITests */,
+				34EA2520304ACBCA0091D138 /* CodeCam */,
+				34EA252D304ACBCC0091D138 /* CodeCamTests */,
+				34EA2537304ACBCC0091D138 /* CodeCamUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -258,12 +271,12 @@
 /* Begin PBXTargetDependency section */
 		34EA2530304ACBCC0091D138 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 34EA2520304ACBCA0091D138 /* CamCode */;
+			target = 34EA2520304ACBCA0091D138 /* CodeCam */;
 			targetProxy = 34EA252F304ACBCC0091D138 /* PBXContainerItemProxy */;
 		};
 		34EA253A304ACBCC0091D138 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 34EA2520304ACBCA0091D138 /* CamCode */;
+			target = 34EA2520304ACBCA0091D138 /* CodeCam */;
 			targetProxy = 34EA2539304ACBCC0091D138 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -384,6 +397,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
@@ -399,7 +413,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LNH9L8D8HS;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CodeCam/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodeCam;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "CodeCam 需要使用相机扫描产品码并采集任务图片。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CodeCam 需要使用麦克风录制现场视频。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -410,7 +430,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCode;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -418,7 +438,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -431,7 +451,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LNH9L8D8HS;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CodeCam/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodeCam;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "CodeCam 需要使用相机扫描产品码并采集任务图片。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CodeCam 需要使用麦克风录制现场视频。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -442,7 +468,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCode;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -450,7 +476,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -464,15 +490,15 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCodeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCamTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CamCode.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CamCode";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CodeCam.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CodeCam";
 			};
 			name = Debug;
 		};
@@ -486,15 +512,15 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCodeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCamTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CamCode.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CamCode";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CodeCam.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CodeCam";
 			};
 			name = Release;
 		};
@@ -506,15 +532,15 @@
 				DEVELOPMENT_TEAM = LNH9L8D8HS;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCodeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCamUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = CamCode;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CodeCam;
 			};
 			name = Debug;
 		};
@@ -526,22 +552,22 @@
 				DEVELOPMENT_TEAM = LNH9L8D8HS;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = linden.CamCodeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = linden.CodeCamUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = CamCode;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CodeCam;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		34EA251C304ACBCA0091D138 /* Build configuration list for PBXProject "CamCode" */ = {
+		34EA251C304ACBCA0091D138 /* Build configuration list for PBXProject "CodeCam" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				34EA2540304ACBCC0091D138 /* Debug */,
@@ -550,7 +576,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		34EA2542304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCode" */ = {
+		34EA2542304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCam" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				34EA2543304ACBCC0091D138 /* Debug */,
@@ -559,7 +585,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		34EA2545304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCodeTests" */ = {
+		34EA2545304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCamTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				34EA2546304ACBCC0091D138 /* Debug */,
@@ -568,7 +594,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		34EA2548304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CamCodeUITests" */ = {
+		34EA2548304ACBCC0091D138 /* Build configuration list for PBXNativeTarget "CodeCamUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				34EA2549304ACBCC0091D138 /* Debug */,

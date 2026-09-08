@@ -1,13 +1,13 @@
 //
-//  CamCodeUITestsLaunchTests.swift
-//  CamCodeUITests
+//  CodeCamUITestsLaunchTests.swift
+//  CodeCamUITests
 //
 //  Created by lai lin on 2026/9/4.
 //
 
 import XCTest
 
-final class CamCodeUITestsLaunchTests: XCTestCase {
+final class CodeCamUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
