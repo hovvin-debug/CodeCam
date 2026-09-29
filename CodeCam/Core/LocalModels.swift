@@ -2,6 +2,15 @@ import Foundation
 import SwiftData
 
 @Model
+final class CustomerPendingAction {
+    @Attribute(.unique) var id: String
+    var action: String
+    var payloadJSON: String
+    var createdAt: Date
+    init(action: String, payloadJSON: String) { self.id = UUID().uuidString; self.action = action; self.payloadJSON = payloadJSON; self.createdAt = .now }
+}
+
+@Model
 final class UserSessionRecord {
     @Attribute(.unique) var userID: String
     var terminalID: String
@@ -9,6 +18,7 @@ final class UserSessionRecord {
     var username: String = ""
     var displayName: String = ""
     var platformOperator: Bool = false
+    var contextTypeRaw: String = "STAFF"
     var isAuthenticated: Bool = false
     var expiresAt: Date?
     var updatedAt: Date
@@ -20,6 +30,7 @@ final class UserSessionRecord {
         username: String = "",
         displayName: String = "",
         platformOperator: Bool = false,
+        contextTypeRaw: String = "STAFF",
         isAuthenticated: Bool = false,
         expiresAt: Date? = nil
     ) {
@@ -29,6 +40,7 @@ final class UserSessionRecord {
         self.username = username
         self.displayName = displayName
         self.platformOperator = platformOperator
+        self.contextTypeRaw = contextTypeRaw
         self.isAuthenticated = isAuthenticated
         self.expiresAt = expiresAt
         self.updatedAt = .now
@@ -139,6 +151,7 @@ final class ExecutionList {
     var assignmentDescription: String
     var updatedAt: Date
     var lastRefreshError: String?
+    var lastChangeNotice: String?
 
     init(
         id: String = UUID().uuidString.lowercased(),
@@ -172,6 +185,13 @@ final class ExecutionItem {
     var captureID: String?
     var completedAt: Date?
     var exceptionReason: String?
+    var priorityRaw: String = TaskPriority.normal.rawValue
+    var dueAt: Date?
+    var templateVersion: String = ""
+    var requirementSummary: String = ""
+    var requiredEvidenceJSON: String = "[]"
+    var changeNotice: String?
+    var taskStateRaw: String = ""
     var updatedAt: Date
 
     init(
@@ -200,6 +220,16 @@ final class ExecutionItem {
     var state: ExecutionItemState {
         get { ExecutionItemState(rawValue: stateRaw) ?? .pending }
         set { stateRaw = newValue.rawValue }
+    }
+
+    var priority: TaskPriority {
+        get { TaskPriority(rawValue: priorityRaw) ?? .normal }
+        set { priorityRaw = newValue.rawValue }
+    }
+
+    var requiredEvidence: [EvidenceRequirement] {
+        let data = Data(requiredEvidenceJSON.utf8)
+        return (try? JSONDecoder().decode([EvidenceRequirement].self, from: data)) ?? []
     }
 }
 

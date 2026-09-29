@@ -8,8 +8,20 @@ struct SyncQueueView: View {
     @Query private var captures: [CaptureSession]
     @Query private var drafts: [TaskDraft]
     @Query private var media: [LocalMedia]
+    @Query private var registrations: [DeviceRegistration]
     @State private var syncing = false
     @State private var alert: AppAlert?
+
+    private var registration: DeviceRegistration? {
+        registrations.first { $0.terminalID == InstallationIDStore.value }
+    }
+
+    private var deviceReadyForSync: Bool {
+        switch registration?.state {
+        case .registered, .online, .offline: true
+        default: false
+        }
+    }
 
     private var pendingItems: [OutboxItem] {
         items.filter { $0.state != .synced && $0.state != .abandoned }
@@ -38,11 +50,18 @@ struct SyncQueueView: View {
     var body: some View {
         List {
             Section {
-                Text("拍照、录像、备注后会自动尝试同步。失败项仍保存在本机，可重试或放弃。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                CodeCamConfigStatusBanner(
+                    title: deviceReadyForSync ? "正在自动同步" : "等待设备连接",
+                    subtitle: deviceReadyForSync ? "网络恢复后会继续上传" : "请先在「我的」完成平台连接",
+                    showsOnlineDot: deviceReadyForSync
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
                 Button(syncing ? "正在同步…" : "立即同步") { sync() }
-                    .disabled(syncing || !canSync)
+                    .disabled(syncing || !canSync || !deviceReadyForSync)
+                Text("拍照、录像、备注后会自动尝试同步。失败项仍保存在本机，可左滑重试或放弃。")
+                    .font(.caption)
+                    .foregroundStyle(CodeCamTheme.muted)
             }
             Section("待同步内容（\(pendingItems.count)）") {
                 if pendingItems.isEmpty {
@@ -91,6 +110,7 @@ struct SyncQueueView: View {
         }
         .navigationTitle("同步队列")
         .navigationBarTitleDisplayMode(.inline)
+        .codeCamPage()
         .task {
             SyncScheduler.schedule(in: modelContext, delayNanoseconds: 500_000_000)
         }
@@ -204,7 +224,7 @@ struct SyncQueueView: View {
         Task {
             defer { syncing = false }
             do {
-                let count = try await EdgeFlowSyncService.syncAll(in: modelContext)
+                let count = try await EdgeFlowSyncService.syncAll(in: modelContext, forceRetry: true)
                 let remaining = try modelContext.fetch(FetchDescriptor<OutboxItem>()).filter {
                     $0.state != .synced && $0.state != .abandoned
                 }.count

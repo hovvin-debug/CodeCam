@@ -74,12 +74,15 @@ struct PlatformPortalResource: Equatable {
 enum ScannedCodeRoute: Equatable {
     case productCode(String)
     case platformPortal(PlatformPortalResource)
+    case loginChallenge(String)
 
     nonisolated static func == (lhs: ScannedCodeRoute, rhs: ScannedCodeRoute) -> Bool {
         switch (lhs, rhs) {
         case (.productCode(let left), .productCode(let right)):
             left == right
         case (.platformPortal(let left), .platformPortal(let right)):
+            left == right
+        case (.loginChallenge(let left), .loginChallenge(let right)):
             left == right
         default:
             false
@@ -98,7 +101,12 @@ enum PlatformPortalQRCodeRouter {
             guard let origin = platformBaseURL.flatMap(PlatformOrigin.init(url:)) else {
                 throw PlatformPortalError.invalidPlatformConfiguration
             }
-            return .platformPortal(PlatformPortalResource(path: try normalizedPath(value, origin: origin)))
+            let normalized = try normalizedPath(value, origin: origin)
+            let prefix = "/console/qr-login/"
+            if normalized.hasPrefix(prefix), normalized.count > prefix.count {
+                return .loginChallenge(String(normalized.dropFirst(prefix.count)))
+            }
+            return .platformPortal(PlatformPortalResource(path: normalized))
         }
 
         let lowercased = value.lowercased()
@@ -120,7 +128,12 @@ enum PlatformPortalQRCodeRouter {
             throw PlatformPortalError.invalidPlatformPath
         }
         let path = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
-        return .platformPortal(PlatformPortalResource(path: try normalizedPath(path, origin: origin)))
+        let normalized = try normalizedPath(path, origin: origin)
+        let prefix = "/console/qr-login/"
+        if normalized.hasPrefix(prefix), normalized.count > prefix.count {
+            return .loginChallenge(String(normalized.dropFirst(prefix.count)))
+        }
+        return .platformPortal(PlatformPortalResource(path: normalized))
     }
 
     private static func normalizedPath(_ path: String, origin: PlatformOrigin) throws -> String {

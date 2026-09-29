@@ -17,6 +17,10 @@ struct PlatformConnectionView: View {
     @State private var working = false
     @State private var workingMessage = "正在连接平台…"
     @State private var alert: AppAlert?
+    @State private var serverHost = PlatformEndpoint.defaultHost
+    @State private var serverPort = String(PlatformEndpoint.defaultPort)
+    @State private var usesHTTPS = false
+    @State private var serverDirty = false
 
     private var session: UserSessionRecord? {
         sessions.first { $0.isAuthenticated } ?? sessions.first
@@ -51,11 +55,13 @@ struct PlatformConnectionView: View {
 
     var body: some View {
         Form {
+            platformServerSection
             accountSections
             deviceSections
         }
         .navigationTitle("平台连接")
         .navigationBarTitleDisplayMode(.inline)
+        .codeCamPage()
         .overlay {
             if working {
                 ProgressView(workingMessage)
@@ -66,12 +72,82 @@ struct PlatformConnectionView: View {
         .task {
             _ = AccountAuthService.session(in: modelContext)
             _ = DeviceRegistrationService.registration(in: modelContext)
+            loadServerSettings()
         }
         .task(id: pairingTaskID) {
             await pollWhileWaiting()
         }
         .alert(item: $alert) { item in
             Alert(title: Text(item.title), message: Text(item.message), dismissButton: .default(Text("知道了")))
+        }
+    }
+
+    private var canEditServer: Bool {
+        switch registration?.state {
+        case .pairing, .claimed, .registered, .online, .offline: false
+        default: true
+        }
+    }
+
+    @ViewBuilder
+    private var platformServerSection: some View {
+        Section {
+            if canEditServer {
+                TextField("服务器地址", text: $serverHost)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .onChange(of: serverHost) { _, _ in serverDirty = true }
+                TextField("端口", text: $serverPort)
+                    .keyboardType(.numberPad)
+                    .onChange(of: serverPort) { _, _ in serverDirty = true }
+                Toggle("使用 HTTPS", isOn: $usesHTTPS)
+                    .onChange(of: usesHTTPS) { _, _ in serverDirty = true }
+                if serverDirty {
+                    Button("保存服务器设置") {
+                        saveServerSettings()
+                    }
+                }
+            } else {
+                LabeledContent("服务器", value: serverHost)
+                LabeledContent("端口", value: serverPort)
+                LabeledContent("协议", value: usesHTTPS ? "HTTPS" : "HTTP")
+            }
+            LabeledContent("当前地址", value: previewServerURL)
+        } header: {
+            Text("开放平台")
+        } footer: {
+            if canEditServer {
+                Text("填写局域网 EdgeFlow 服务器的 IP 或域名与端口，保存后再登录账号并认领设备。")
+            } else {
+                Text("设备已连接或正在认领中，暂不能修改服务器。如需更换平台，请先断开设备连接或重置配对。")
+            }
+        }
+    }
+
+    private var previewServerURL: String {
+        let scheme = usesHTTPS ? "https" : "http"
+        let host = serverHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = serverPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, !port.isEmpty else { return EdgeFlowClient.defaultBaseURL }
+        return "\(scheme)://\(host):\(port)"
+    }
+
+    private func loadServerSettings() {
+        let endpoint = PlatformEndpoint.current()
+        serverHost = endpoint.host
+        serverPort = String(endpoint.port)
+        usesHTTPS = endpoint.usesHTTPS
+        serverDirty = false
+    }
+
+    private func saveServerSettings() {
+        do {
+            _ = try PlatformEndpoint.save(host: serverHost, portText: serverPort, usesHTTPS: usesHTTPS)
+            serverDirty = false
+            alert = AppAlert(title: "已保存", message: "平台地址已更新为 \(previewServerURL)")
+        } catch {
+            alert = AppAlert(title: "无法保存", message: error.localizedDescription)
         }
     }
 
@@ -237,6 +313,10 @@ struct PlatformConnectionView: View {
     }
 
     private func submitAccount() {
+        if serverDirty {
+            alert = AppAlert(title: "请先保存服务器设置", message: "修改了服务器或端口后，请先点「保存服务器设置」。")
+            return
+        }
         if authMode == .register {
             guard password == confirmPassword else {
                 alert = AppAlert(title: "无法注册", message: "两次输入的密码不一致。")
@@ -306,6 +386,10 @@ struct PlatformConnectionView: View {
 
     private func runDevice(message: String, _ action: @escaping (DeviceRegistration) async throws -> Void) {
         guard let registration else { return }
+        if serverDirty {
+            alert = AppAlert(title: "请先保存服务器设置", message: "修改了服务器或端口后，请先点「保存服务器设置」。")
+            return
+        }
         workingMessage = message
         working = true
         Task {

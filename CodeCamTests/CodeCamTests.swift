@@ -68,6 +68,20 @@ struct CodeCamTests {
         #expect(AccountCredentialsValidator.validateDisplayName("   ") != nil)
     }
 
+    @Test func platformEndpointBuildsAndValidatesLANAddress() throws {
+        let endpoint = try PlatformEndpoint.save(host: "192.168.1.5", portText: "8000", usesHTTPS: false)
+        #expect(endpoint.urlString == "http://192.168.1.5:8000")
+        #expect(PlatformEndpoint.validate(host: "", portText: "8000") != nil)
+        #expect(PlatformEndpoint.validate(host: "http://bad", portText: "8000") != nil)
+        #expect(PlatformEndpoint.validate(host: "192.168.1.5", portText: "0") != nil)
+    }
+
+    @Test func taskProgressMatchesPrototypeRounding() {
+        #expect(CodeCamProgressMath.fraction(completed: 20, total: 68) == 20.0 / 68.0)
+        #expect(CodeCamProgressMath.percentText(completed: 20, total: 68) == "29%")
+        #expect(CodeCamProgressMath.fraction(completed: 0, total: 0) == 0)
+    }
+
     @Test func relatedScanAcceptsLogisticsPayload() {
         #expect(CodeValidator.validateRelated("SF123456789CN") == nil)
         #expect(CodeValidator.validateRelated("(00)123456789012345678") == nil)
