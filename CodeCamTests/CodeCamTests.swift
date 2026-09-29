@@ -1,77 +1,68 @@
-//
-//  CodeCamTests.swift
-//  CodeCamTests
-//
-//  Created by lai lin on 2026/9/4.
-//
-
-import Foundation
-import Testing
+import XCTest
+import UIKit
 @testable import CodeCam
 
-struct CodeCamTests {
-
-    @Test func validProductCodePassesLocalValidation() {
-        #expect(CodeValidator.validate("CC-2026-0001") == nil)
-    }
-
-    @Test func invalidProductCodeIsRejected() {
-        #expect(CodeValidator.validate("bad code!") != nil)
-    }
-
-    @Test func fixedFormReportsRequiredFields() {
-        let missing = FixedTaskFormValidator.missingFields(for: .empty)
-        #expect(missing == ["现场地点", "现场说明"])
-    }
-
-    @Test func eventIdentityIsReusableAsIdempotencyKey() {
-        let eventID = ClientEventIdentity.make()
-        let outbox = OutboxItem(eventID: eventID, kind: "form.saved", bodyJSON: "{}")
-        #expect(outbox.eventID == eventID)
-        #expect(outbox.idempotencyKey == eventID)
-    }
-
-    @Test func platformQRCodeUsesOnlyConfiguredOrigin() throws {
-        let platformURL = try #require(URL(string: "https://192.0.2.10:8443"))
-        let route = try PlatformPortalQRCodeRouter.route(
-            scannedValue: "https://192.0.2.10:8443/q/7fA9K",
-            platformBaseURL: platformURL
-        )
-        #expect(route == .platformPortal(PlatformPortalResource(path: "/q/7fA9K")))
-    }
-
-    @Test func externalQRCodeIsRejected() throws {
-        let platformURL = try #require(URL(string: "https://platform.example.com"))
-        #expect(throws: PlatformPortalError.nonPlatformAddress) {
-            try PlatformPortalQRCodeRouter.route(
-                scannedValue: "https://untrusted.example.com/q/7fA9K",
-                platformBaseURL: platformURL
-            )
+@MainActor final class CodeCamTests: XCTestCase {
+    func temporaryRoot() -> URL { FileManager.default.temporaryDirectory.appending(path: UUID().uuidString) }
+    func testDraftAndPhotosSurviveRestartAndCompletionIsImmutable() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordStore(root: root)
+        let id = try store.create(serial: "  SN-001  ")
+        try store.updateNote(id, note: "检查合格")
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
+        try store.addPhoto(id, jpeg: XCTUnwrap(image.jpegData(compressionQuality: 0.8)))
+        let restored = RecordStore(root: root)
+        XCTAssertNil(restored.loadError)
+        let record = try XCTUnwrap(restored.record(id))
+        XCTAssertEqual(record.serial, "SN-001"); XCTAssertEqual(record.note, "检查合格")
+        XCTAssertEqual(record.spaceID, store.archive.spaceID)
+        XCTAssertEqual(record.photos.count, 1)
+        XCTAssertNotNil(UIImage(contentsOfFile: restored.photoURL(record.photos[0]).path))
+        try restored.complete(id)
+        XCTAssertThrowsError(try restored.updateNote(id, note: "覆盖"))
+        XCTAssertNotNil(RecordStore(root: root).record(id)?.submittedAt)
     }
-
-    @Test func productCodeRemainsInCaptureFlow() throws {
-        let platformURL = try #require(URL(string: "https://platform.example.com"))
-        let route = try PlatformPortalQRCodeRouter.route(scannedValue: "CC-2026-0001", platformBaseURL: platformURL)
-        #expect(route == .productCode("CC-2026-0001"))
+    func testSameSerialKeepsIndependentCapturesAndCase() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordStore(root: root)
+        let first = try store.create(serial: "Sn-01")
+        let second = try store.create(serial: "Sn-01")
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(store.records.count, 2)
+        XCTAssertEqual(store.records.first?.serial, "Sn-01")
+        XCTAssertThrowsError(try store.create(serial: "   "))
+        XCTAssertThrowsError(try store.complete(first))
     }
-
-    @Test func validAccountCredentialsPassLocalValidation() {
-        #expect(AccountCredentialsValidator.validateUsername("field_ops") == nil)
-        #expect(AccountCredentialsValidator.validatePassword("Passw0rd!") == nil)
-        #expect(AccountCredentialsValidator.validateDisplayName("现场员") == nil)
+    func testCloudBindingMigratesSpaceAndRejectsDifferentAccount() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordStore(root: root)
+        let id = try store.create(serial: "SN-BIND")
+        let binding = CloudBinding(server: "https://example.com", userID: UUID(), spaceID: UUID(), username: "first")
+        try store.bindCloud(binding)
+        XCTAssertEqual(store.archive.spaceID, binding.spaceID)
+        XCTAssertEqual(store.record(id)?.spaceID, binding.spaceID)
+        XCTAssertEqual(RecordStore(root: root).archive.cloudBinding, binding)
+        XCTAssertThrowsError(try store.bindCloud(CloudBinding(server: binding.server, userID: UUID(), spaceID: UUID(), username: "second")))
+        XCTAssertEqual(store.record(id)?.spaceID, binding.spaceID)
     }
-
-    @Test func invalidAccountCredentialsAreRejected() {
-        #expect(AccountCredentialsValidator.validateUsername("ab") != nil)
-        #expect(AccountCredentialsValidator.validatePassword("short") != nil)
-        #expect(AccountCredentialsValidator.validateDisplayName("   ") != nil)
+    func testCorruptArchiveIsPreservedAndCannotBeOverwritten() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appending(path: "records.json")
+        let data = Data("corrupted".utf8); try data.write(to: file)
+        let store = RecordStore(root: root)
+        XCTAssertNotNil(store.loadError)
+        XCTAssertThrowsError(try store.create(serial: "SN"))
+        XCTAssertEqual(try Data(contentsOf: file), data)
     }
-
-    @Test func relatedScanAcceptsLogisticsPayload() {
-        #expect(CodeValidator.validateRelated("SF123456789CN") == nil)
-        #expect(CodeValidator.validateRelated("(00)123456789012345678") == nil)
-        #expect(CodeValidator.normalizeRelated("SF 123 456") == "SF123456")
-        #expect(CodeValidator.validate("SF 123") != nil)
+    func testFailedDiskSaveDoesNotReportSuccessfulRecord() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordStore(root: root)
+        try FileManager.default.removeItem(at: root)
+        try Data().write(to: root)
+        XCTAssertThrowsError(try store.create(serial: "SN"))
+        XCTAssertTrue(store.records.isEmpty)
     }
 }
