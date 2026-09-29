@@ -125,7 +125,7 @@ struct ProductCaptureView: View {
                     tag: profile.status.isEmpty ? "产品码已验证" : profile.status,
                     tagStyle: .mint,
                     title: profile.serialNumber.isEmpty ? capture.codeValue : profile.serialNumber,
-                    subtitle: executionItem?.orderSummary.map { "订单 · \($0)" } ?? "任务 · \(draft.title)"
+                    subtitle: "任务 · \(draft.title)"
                 )
 
                 CodeCamSectionHeader(title: "产品信息")

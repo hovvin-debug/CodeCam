@@ -30,7 +30,7 @@ struct TaskDetailView: View {
                             tag: item.state.title,
                             tagStyle: item.state.isOutstanding ? .blue : .mint,
                             title: draft.title,
-                            subtitle: "平台下发至当前工位"
+                            subtitle: "CodeCam 本地 SN 任务"
                         )
 
                         CodeCamKeyValueList {
@@ -43,9 +43,6 @@ struct TaskDetailView: View {
                                 label: "采集规则",
                                 value: item.requirementSummary.isEmpty ? "扫码后按产品规则执行" : item.requirementSummary
                             )
-                            if let order = item.orderSummary, !order.isEmpty {
-                                CodeCamKeyValueRow(label: "订单", value: order)
-                            }
                         }
 
                         CodeCamSectionHeader(

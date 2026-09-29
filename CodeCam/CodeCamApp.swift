@@ -44,7 +44,6 @@ private struct MainTabView: View {
     @State private var selectedTab: AppTab = .tasks
     @State private var captureRootID = UUID()
     @State private var targetExecutionItemID: String?
-    @AppStorage(CodeCamAppModeStore.key) private var appMode = CodeCamAppMode.staff.rawValue
 
     private var registration: DeviceRegistration? {
         registrations.first { $0.terminalID == InstallationIDStore.value }
@@ -63,12 +62,7 @@ private struct MainTabView: View {
     }
 
     var body: some View {
-        if appMode == CodeCamAppMode.customer.rawValue {
-            CustomerModeRootView()
-                .task { _ = AccountAuthService.session(in: modelContext) }
-        } else {
         staffTabs
-        }
     }
 
     private var staffTabs: some View {

@@ -153,7 +153,7 @@ struct ContentView: View {
                     ContentUnavailableView(
                         "还不能扫码",
                         systemImage: "barcode.viewfinder",
-                        description: Text("先到「我的」登录并连接设备，再到「任务」刷新今日清单。")
+                        description: Text("先到「任务」点击「添加扫码任务」，扫描客户现有 SN。")
                     )
                     .frame(maxWidth: .infinity)
                     .codeCamCard()
@@ -219,15 +219,15 @@ struct ContentView: View {
 
     private var scanFooter: String {
         if assignedDraft == nil {
-            return "连接设备并刷新任务后即可扫码。"
+            return "先添加一个 SN 扫码任务。"
         }
         if todayExecutionList == nil {
-            return "今日清单尚未拉取。请先到「任务」刷新后再扫码。"
+            return "先到「任务」添加客户现有 SN。"
         }
         if outstandingCount > 0 {
             return "今日还有 \(outstandingCount) 项待扫码，完整清单在「任务」。"
         }
-        return "今日待办已完成。仅可扫码当前任务清单内的 SN。"
+        return "今日任务已完成；可继续添加新的 SN 扫码任务。"
     }
 
     private func consumePendingScan() {

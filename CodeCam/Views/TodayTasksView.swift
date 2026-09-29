@@ -100,8 +100,8 @@ struct TodayTasksView: View {
                         )
 
                         CodeCamTaskSummaryCard(
-                            stationTitle: assignedDraft?.title ?? "当前工位任务",
-                            taskLabel: "当前工位任务",
+                            stationTitle: assignedDraft?.title ?? "今日扫码任务",
+                            taskLabel: "CodeCam 本地任务",
                             pending: outstandingCount,
                             completed: completedCount,
                             uploading: queuedCount,
@@ -242,8 +242,8 @@ struct StationTaskInfoView: View {
                 CodeCamDetailHero(
                     tag: "执行中",
                     tagStyle: .blue,
-                    title: draft?.title ?? "当前工位任务",
-                    subtitle: "平台下发至当前工位"
+                    title: draft?.title ?? "今日扫码任务",
+                    subtitle: "CodeCam 本地执行上下文"
                 )
                 CodeCamKeyValueList {
                     CodeCamKeyValueRow(label: "执行范围", value: "\(todayItems.count) 个 SN，已完成 \(completedCount) 个")

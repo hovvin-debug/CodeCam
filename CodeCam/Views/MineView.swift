@@ -101,34 +101,6 @@ struct MineView: View {
                     .padding(.vertical, 8)
                     .codeCamListCard()
 
-                    CodeCamSectionHeader(title: "更多", compactTopSpacing: true)
-                    NavigationLink {
-                        MoreServicesView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text("⋯")
-                                .font(.title3)
-                                .foregroundStyle(CodeCamTheme.blue)
-                                .frame(width: 34, height: 34)
-                                .background(CodeCamTheme.blueSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("更多服务").font(.subheadline.weight(.semibold))
-                                Text("顾客模式与其他辅助入口").font(.caption).foregroundStyle(CodeCamTheme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(CodeCamTheme.muted)
-                        }
-                        .padding(13)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(CodeCamTheme.line, lineWidth: 1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-
                     Text("CodeCam \(DeviceIdentity.version) · 数据已加密保护")
                         .font(.caption).foregroundStyle(CodeCamTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -144,49 +116,5 @@ struct MineView: View {
                 _ = DeviceRegistrationService.registration(in: modelContext)
             }
         }
-    }
-}
-
-struct MoreServicesView: View {
-    @Environment(\.modelContext) private var modelContext
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                CodeCamSectionHeader(title: "辅助入口")
-                Button {
-                    AccountAuthService.logout(in: modelContext)
-                    CodeCamAppModeStore.set(.customer)
-                } label: {
-                    HStack(spacing: 12) {
-                        Text("⌂")
-                            .font(.title3)
-                            .foregroundStyle(CodeCamTheme.blue)
-                            .frame(width: 34, height: 34)
-                            .background(CodeCamTheme.blueSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("顾客模式").font(.subheadline.weight(.semibold))
-                            Text("查询产品、订单和售后服务").font(.caption).foregroundStyle(CodeCamTheme.muted)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(CodeCamTheme.muted)
-                    }
-                    .padding(13)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(CodeCamTheme.line, lineWidth: 1)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .navigationTitle("更多服务")
-        .navigationBarTitleDisplayMode(.inline)
-        .codeCamPage()
     }
 }

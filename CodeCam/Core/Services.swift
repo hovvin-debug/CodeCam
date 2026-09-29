@@ -29,33 +29,6 @@ enum ExecutionListService {
         return formatter.string(from: .now)
     }
 
-    static func seedTodayIfNeeded(in context: ModelContext) {
-        let key = todayKey()
-        let listDescriptor = FetchDescriptor<ExecutionList>(predicate: #Predicate { $0.workDateKey == key })
-        guard (try? context.fetch(listDescriptor).isEmpty) == true else { return }
-        let draftDescriptor = FetchDescriptor<TaskDraft>(sortBy: [SortDescriptor(\TaskDraft.updatedAt, order: .reverse)])
-        guard let primaryDraft = try? context.fetch(draftDescriptor).first else { return }
-
-        let list = ExecutionList(workDateKey: key, title: "今日现场清单", assignmentDescription: "当前设备 · 本地缓存")
-        context.insert(list)
-        let examples = [
-            ("CC-20260907-001", "控制柜", "CC-24A", "订单 SO-20260907-A"),
-            ("CC-20260907-002", "控制柜", "CC-24A", "订单 SO-20260907-A"),
-            ("CC-20260907-003", "配电组件", "PD-08", "订单 SO-20260907-A"),
-            ("CC-20260907-004", "配电组件", "PD-08", "订单 SO-20260907-A"),
-        ]
-        for (code, name, model, order) in examples {
-            context.insert(ExecutionItem(
-                listID: list.id,
-                draftID: primaryDraft.id,
-                codeValue: code,
-                productName: name,
-                productModel: model,
-                orderSummary: order
-            ))
-        }
-    }
-
     static func item(matching code: String, in list: ExecutionList?, from items: [ExecutionItem]) -> ExecutionItem? {
         let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return items.first {
