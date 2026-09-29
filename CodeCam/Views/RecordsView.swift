@@ -2,30 +2,44 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+private enum RecordsScope: String, CaseIterable, Identifiable {
+    case all, today, pendingUpload
+
+    var id: String { rawValue }
+}
+
 /// Local records are explicitly separated from future factory-authorized platform results.
 struct RecordsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \CaptureSession.scannedAt, order: .reverse) private var captures: [CaptureSession]
     @Query(sort: \LocalMedia.capturedAt, order: .reverse) private var media: [LocalMedia]
+    @Query private var events: [LocalEvent]
     @State private var search = ""
-    @State private var bySerial = false
-    @State private var days = 0
+    @State private var scope: RecordsScope = .all
     @State private var scannerPresented = false
 
-    private var results: [CaptureSession] {
+    private var baseResults: [CaptureSession] {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let start = Calendar.current.startOfDay(for: .now)
-        let cutoff = Calendar.current.date(byAdding: .day, value: -(max(days, 1) - 1), to: start) ?? start
         return captures.filter { item in
-            (days == 0 || item.scannedAt >= cutoff) &&
-            (term.isEmpty || [item.codeValue, item.productName ?? "", item.productModel ?? ""]
-                .contains { $0.localizedStandardContains(term) })
+            term.isEmpty || [item.codeValue, item.productName ?? "", item.productModel ?? ""]
+                .contains { $0.localizedStandardContains(term) }
         }
     }
 
-    private var serials: [String] {
-        var seen = Set<String>()
-        return results.compactMap { seen.insert($0.codeValue).inserted ? $0.codeValue : nil }
+    private var todayCount: Int {
+        baseResults.filter { Calendar.current.isDateInToday($0.scannedAt) }.count
+    }
+
+    private var pendingUploadCount: Int {
+        baseResults.filter { isPendingUpload($0) }.count
+    }
+
+    private var results: [CaptureSession] {
+        switch scope {
+        case .all: return baseResults
+        case .today: return baseResults.filter { Calendar.current.isDateInToday($0.scannedAt) }
+        case .pendingUpload: return baseResults.filter { isPendingUpload($0) }
+        }
     }
 
     private var dates: [Date] {
@@ -34,103 +48,76 @@ struct RecordsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Picker("查看方式", selection: $bySerial) {
-                        Text("按时间").tag(false)
-                        Text("按序列号").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    Picker("时间范围", selection: $days) {
-                        Text("全部").tag(0)
-                        Text("今天").tag(1)
-                        Text("近七天").tag(7)
-                        Text("近三十天").tag(30)
-                    }
-                    HStack(spacing: 10) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                            TextField("序列号、产品名称或型号", text: $search)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .submitLabel(.search)
-                            if !search.isEmpty {
-                                Button {
-                                    search = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("清除搜索")
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    CodeCamSearchBar(
+                        text: $search,
+                        placeholder: "序列号、产品名称、型号",
+                        showsScanButton: true,
+                        onScan: { scannerPresented = true }
+                    )
 
-                        Button {
-                            scannerPresented = true
-                        } label: {
-                            Image(systemName: "barcode.viewfinder")
-                                .font(.title3.weight(.semibold))
-                                .frame(width: 44, height: 44)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            CodeCamFilterChip(title: "全部 \(baseResults.count)", isSelected: scope == .all) { scope = .all }
+                            CodeCamFilterChip(title: "今天 \(todayCount)", isSelected: scope == .today) { scope = .today }
+                            CodeCamFilterChip(title: "待上传 \(pendingUploadCount)", isSelected: scope == .pendingUpload) { scope = .pendingUpload }
                         }
-                        .buttonStyle(.bordered)
-                        .buttonBorderShape(.roundedRectangle(radius: 12))
-                        .accessibilityLabel("扫码查询")
                     }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
-                    .listRowBackground(Color.clear)
-                } footer: {
-                    Text("仅本机采集记录。共 \(results.count) 条。")
-                }
-                if results.isEmpty {
-                    Section {
+
+                    CodeCamRecordSummaryLine(leading: "按扫码时间排序", trailing: "含照片、视频和备注")
+
+                    if results.isEmpty {
                         ContentUnavailableView(
                             "没有符合条件的记录",
                             systemImage: "clock.arrow.circlepath",
                             description: Text("可改筛选条件，或扫码按序列号查找。")
                         )
-                        .listRowBackground(Color.clear)
-                    }
-                } else if bySerial {
-                    Section("序列号") {
-                        ForEach(serials, id: \.self) { serial in
-                            NavigationLink {
-                                SerialRecordsView(serial: serial)
-                            } label: {
-                                ProductIdentityRow(
-                                    code: serial,
-                                    productName: results.first { $0.codeValue == serial }?.productName,
-                                    productModel: results.first { $0.codeValue == serial }?.productModel,
-                                    caption: "\(results.filter { $0.codeValue == serial }.count) 次采集",
-                                    thumbnail: thumbnail(for: results.first { $0.codeValue == serial }?.id),
-                                    showsThumbnailSlot: true
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    ForEach(dates, id: \.self) { day in
-                        Section(day.formatted(date: .abbreviated, time: .omitted)) {
-                            ForEach(results.filter { Calendar.current.isDate($0.scannedAt, inSameDayAs: day) }) { item in
-                                NavigationLink { RecordReadOnlyView(capture: item) } label: {
-                                    RecordSummaryRow(capture: item, thumbnail: thumbnail(for: item.id))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                    } else {
+                        ForEach(dates, id: \.self) { day in
+                            let dayItems = results.filter { Calendar.current.isDate($0.scannedAt, inSameDayAs: day) }
+                            CodeCamDateSectionLabel(title: recordsDateTitle(day))
+                            VStack(spacing: 0) {
+                                ForEach(Array(dayItems.enumerated()), id: \.element.id) { index, item in
+                                    NavigationLink {
+                                        ProductCaptureView(captureID: item.id, draftID: item.draftID, isHistory: true)
+                                    } label: {
+                                        CodeCamScanRow(
+                                            serial: item.codeValue,
+                                            productName: item.productName,
+                                            productModel: item.productModel,
+                                            mediaSummary: mediaSummary(for: item.id),
+                                            stateTitle: stateTitle(for: item),
+                                            timeCaption: WallClock.time(item.scannedAt),
+                                            palette: CodeCamScanThumbPalette.forIndex(index),
+                                            thumbnail: thumbnail(for: item.id)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    if index < dayItems.count - 1 { CodeCamListDivider() }
                                 }
                             }
+                            .codeCamListCard()
                         }
                     }
+
+                    Text("仅本机扫码记录。共 \(results.count) 条。")
+                        .font(.caption)
+                        .foregroundStyle(CodeCamTheme.muted)
+                        .padding(.horizontal, 2)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
             .navigationTitle("记录")
             .navigationBarTitleDisplayMode(.large)
+            .codeCamPage()
             .sheet(isPresented: $scannerPresented) {
                 CodeScannerView { code in
                     search = code.trimmingCharacters(in: .whitespacesAndNewlines)
-                    days = 0
-                    bySerial = true
+                    scope = .all
                     scannerPresented = false
                 } onCancel: { scannerPresented = false }
             }
@@ -143,6 +130,45 @@ struct RecordsView: View {
     private func thumbnail(for captureID: String?) -> UIImage? {
         guard let captureID else { return nil }
         return media.first(where: { $0.captureID == captureID })?.thumbnailImage
+    }
+
+    private func mediaSummary(for captureID: String) -> String? {
+        let items = media.filter { $0.captureID == captureID && !$0.isRelatedMedia }
+        let photos = items.filter { $0.mediaType == "image" }.count
+        let videos = items.filter { $0.mediaType == "video" }.count
+        guard photos > 0 || videos > 0 else { return nil }
+        var parts: [String] = []
+        if photos > 0 { parts.append("\(photos) 照片") }
+        if videos > 0 { parts.append("\(videos) 录像") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func isPendingUpload(_ capture: CaptureSession) -> Bool {
+        let relatedEvents = events.filter { $0.captureID == capture.id }
+        let relatedMedia = media.filter { $0.captureID == capture.id }
+        guard !relatedEvents.isEmpty || !relatedMedia.isEmpty else { return !capture.isCompleted }
+        let eventsSynced = relatedEvents.isEmpty || relatedEvents.allSatisfy { $0.syncStateRaw == SyncState.synced.rawValue }
+        let mediaSynced = relatedMedia.isEmpty || relatedMedia.allSatisfy { $0.syncState == .synced }
+        return !(eventsSynced && mediaSynced)
+    }
+
+    private func stateTitle(for capture: CaptureSession) -> String {
+        isPendingUpload(capture) ? "待上传" : "已完成"
+    }
+
+    private func recordsDateTitle(_ day: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        if Calendar.current.isDateInToday(day) {
+            formatter.setLocalizedDateFormatFromTemplate("Md")
+            return "今天 · \(formatter.string(from: day))"
+        }
+        if Calendar.current.isDateInYesterday(day) {
+            formatter.setLocalizedDateFormatFromTemplate("Md")
+            return "昨天 · \(formatter.string(from: day))"
+        }
+        formatter.setLocalizedDateFormatFromTemplate("yyyyMd")
+        return formatter.string(from: day)
     }
 }
 
@@ -285,7 +311,7 @@ private struct CaptureTimelineNode: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 NavigationLink {
-                    RecordReadOnlyView(capture: capture)
+                    ProductCaptureView(captureID: capture.id, draftID: capture.draftID, isHistory: true)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -413,63 +439,77 @@ private struct RecordReadOnlyView: View {
             && relatedMedia.allSatisfy { $0.syncState == .synced }
     }
     var body: some View {
-        List {
-            Section("扫码记录") {
-                LabeledContent("序列号", value: capture.codeValue)
-                LabeledContent("产品", value: capture.productName ?? "尚未获取")
-                LabeledContent("型号", value: capture.productModel ?? "尚未获取")
-                LabeledContent("任务", value: drafts.first { $0.id == capture.draftID }?.title ?? "未知任务")
-                LabeledContent("扫码时间", value: WallClock.dateTime(capture.scannedAt))
-                LabeledContent("上传状态", value: uploaded ? "已上传" : "待上传")
-            }
-            Section("照片 \(media.filter { $0.mediaType == "image" }.count) / 录像 \(media.filter { $0.mediaType == "video" }.count)") {
-                if media.isEmpty { Text("暂无媒体资源").foregroundStyle(.secondary) }
-                ForEach(media) { item in
-                    Button {
-                        MediaFileStore.healStoredPaths(for: item)
-                        preview = item
-                    } label: {
-                        HStack {
-                            if let image = item.thumbnailImage {
-                                Image(uiImage: image).resizable().scaledToFill()
-                                    .frame(width: 56, height: 56).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else { Image(systemName: item.mediaType == "video" ? "video" : "photo") }
-                            Text(item.mediaType == "video" ? "查看录像" : "查看照片")
-                        }
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                CodeCamDetailHero(
+                    tag: uploaded ? "已同步" : "待上传",
+                    tagStyle: uploaded ? .mint : .blue,
+                    title: capture.codeValue,
+                    subtitle: drafts.first { $0.id == capture.draftID }?.title ?? "未知任务"
+                )
+                CodeCamKeyValueList {
+                    CodeCamKeyValueRow(label: "产品", value: capture.productName ?? "尚未获取")
+                    CodeCamKeyValueRow(label: "型号", value: capture.productModel ?? "尚未获取")
+                    CodeCamKeyValueRow(label: "扫码时间", value: WallClock.dateTime(capture.scannedAt))
+                    CodeCamKeyValueRow(label: "上传状态", value: uploaded ? "已上传" : "待上传", valueColor: uploaded ? CodeCamTheme.green : CodeCamTheme.orange)
                 }
-            }
-            Section("关联码") {
-                if relatedScans.isEmpty {
-                    Text("暂无关联码").foregroundStyle(.secondary)
+                CodeCamSectionHeader(
+                    title: "媒体",
+                    trailing: "照片 \(media.filter { $0.mediaType == "image" }.count) / 录像 \(media.filter { $0.mediaType == "video" }.count)"
+                )
+                if media.isEmpty {
+                    Text("暂无媒体资源").font(.subheadline).foregroundStyle(CodeCamTheme.muted).codeCamCard()
                 } else {
-                    ForEach(relatedScans, id: \.id) { related in
-                        NavigationLink {
-                            RelatedScanCaptureView(relatedScanID: related.id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(related.codeValue).font(.body.monospaced())
-                                Text("\(related.kind.title) · \(WallClock.dateTime(related.createdAt))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 8)], spacing: 8) {
+                        ForEach(media) { item in
+                            Button {
+                                MediaFileStore.healStoredPaths(for: item)
+                                preview = item
+                            } label: {
+                                MediaThumbnail(item: item, size: 76)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
-            }
-            Section("内部备注记录") {
-                if notes.isEmpty { Text("暂无备注").foregroundStyle(.secondary) }
-                ForEach(notes) { note in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(note.text)
-                        Label(WallClock.dateTime(note.createdAt), systemImage: "clock")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }.padding(.vertical, 5)
+                if !relatedScans.isEmpty {
+                    CodeCamSectionHeader(title: "关联码")
+                    VStack(spacing: 0) {
+                        ForEach(relatedScans, id: \.id) { related in
+                            NavigationLink {
+                                RelatedScanCaptureView(relatedScanID: related.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(related.codeValue).font(.subheadline.monospaced())
+                                        Text("\(related.kind.title) · \(WallClock.dateTime(related.createdAt))")
+                                            .font(.caption).foregroundStyle(CodeCamTheme.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(CodeCamTheme.muted)
+                                }
+                                .padding(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .codeCamListCard()
+                }
+                CodeCamSectionHeader(title: "备注")
+                if notes.isEmpty {
+                    Text("暂无备注").font(.subheadline).foregroundStyle(CodeCamTheme.muted)
+                } else {
+                    ForEach(notes) { note in
+                        CodeCamNoteCard(timeCaption: WallClock.time(note.createdAt), bodyText: note.text)
+                    }
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
+        .codeCamPage()
         .sheet(item: $preview) { MediaPreviewView(item: $0) }
     }
 }

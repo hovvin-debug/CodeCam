@@ -10,6 +10,8 @@ struct ProductCaptureView: View {
     @Query private var allMedia: [LocalMedia]
     @Query private var allNotes: [CaptureNote]
     @Query private var allRelated: [RelatedScan]
+    @Query private var allEvents: [LocalEvent]
+    @Query private var executionItems: [ExecutionItem]
 
     let captureID: String
     let draftID: String
@@ -37,6 +39,10 @@ struct ProductCaptureView: View {
     private var captureIsReadOnly: Bool { isHistory || capture?.isCompleted == true }
     private var photoCount: Int { media.filter { $0.mediaType == "image" }.count }
     private var videoCount: Int { media.filter { $0.mediaType == "video" }.count }
+    private var executionItem: ExecutionItem? { executionItems.first { $0.id == capture?.executionItemID } }
+    private var timelineEvents: [LocalEvent] {
+        allEvents.filter { $0.captureID == captureID }.sorted { $0.occurredAt > $1.occurredAt }
+    }
 
     var body: some View {
         Group {
@@ -46,8 +52,16 @@ struct ProductCaptureView: View {
                 ContentUnavailableView("扫码记录不存在", systemImage: "exclamationmark.triangle", description: Text("该记录可能已被清理。"))
             }
         }
-        .navigationTitle(isHistory ? "扫码记录" : "产品采集")
+        .navigationTitle(draft?.title ?? (isHistory ? "扫码记录" : "出厂质检留档"))
         .navigationBarTitleDisplayMode(.inline)
+        .codeCamPage()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink("产品追溯") {
+                    ProductTracePreviewView(captureID: captureID, draftID: draftID)
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             if let capture, let draft {
                 actionBar(capture: capture, draft: draft)
@@ -89,10 +103,13 @@ struct ProductCaptureView: View {
         .task(id: capture?.codeValue) {
             if let capture {
                 profile = await ProductProfileService.fetch(code: capture.codeValue)
-                if capture.productName == nil { capture.productName = profile.productName }
-                if capture.productModel == nil { capture.productModel = profile.productModel }
+                if capture.productName == nil { capture.productName = profile.productName ?? executionItem?.productName }
+                if capture.productModel == nil { capture.productModel = profile.productModel ?? executionItem?.productModel }
                 do { try modelContext.save() }
                 catch { alert = AppAlert(title: "产品资料未保存", message: error.localizedDescription) }
+                if !isHistory {
+                    presentProfileFetchFeedback()
+                }
             }
         }
         .alert(item: $alert) { alert in
@@ -103,191 +120,246 @@ struct ProductCaptureView: View {
     @ViewBuilder
     private func captureContent(capture: CaptureSession, draft: TaskDraft) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("序列号").font(.subheadline).foregroundStyle(.secondary)
-                    Text(profile.serialNumber.isEmpty ? capture.codeValue : profile.serialNumber)
-                        .font(.title2.monospaced().weight(.semibold))
-                    HStack {
-                        Text(profile.status)
-                        Spacer()
-                        Text(profile.sourceDescription)
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .leading, spacing: 18) {
+                CodeCamDetailHero(
+                    tag: profile.status.isEmpty ? "产品码已验证" : profile.status,
+                    tagStyle: .mint,
+                    title: profile.serialNumber.isEmpty ? capture.codeValue : profile.serialNumber,
+                    subtitle: executionItem?.orderSummary.map { "订单 · \($0)" } ?? "任务 · \(draft.title)"
+                )
 
-                GroupBox("产品信息") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        LabeledContent("产品", value: profile.productReference)
-                        LabeledContent("任务", value: draft.title)
-                        LabeledContent("扫码时间", value: WallClock.dateTime(capture.scannedAt))
-                        if profile.fields.isEmpty {
-                            Text("产品字段将在平台校验成功后显示。")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(profile.fields) { field in LabeledContent(field.name, value: field.value) }
-                        }
+                CodeCamSectionHeader(title: "产品信息")
+                CodeCamProductInfoCard(
+                    productName: profile.productName ?? profile.productReference,
+                    rows: productInfoRows(for: capture)
+                )
+
+                CodeCamSectionHeader(title: "本次扫码", trailing: "照片 \(photoCount) / 录像 \(videoCount)")
+                captureMediaGrid
+                mediaStatusLine
+
+                relatedCodeSection
+
+                CodeCamSectionHeader(
+                    title: "备注",
+                    actionTitle: "添加",
+                    action: {
+                        remark = ""
+                        remarksPresented = true
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                )
+                if notes.isEmpty {
+                    CodeCamNoteCard(bodyText: "尚无备注。新增的每条备注都会单独保留记录时间。")
+                } else {
+                    ForEach(notes) { note in
+                        CodeCamNoteCard(timeCaption: WallClock.time(note.createdAt), bodyText: note.text)
+                    }
                 }
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 10) {
-                            MediaCountBadge(title: "照片", count: photoCount, icon: "photo")
-                            MediaCountBadge(title: "录像", count: videoCount, icon: "video")
-                        }
-                        if media.isEmpty {
-                            Text("暂无媒体资源")
-                                .font(.footnote).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 10, alignment: .leading)], alignment: .leading, spacing: 10) {
-                                ForEach(media) { item in
-                                    Button {
-                                        previewMedia = item
-                                    } label: {
-                                        MediaThumbnail(item: item)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("预览\(item.mediaType == "video" ? "录像" : "照片")，\(WallClock.dateTime(item.capturedAt))")
-                                }
+                CodeCamSectionHeader(title: "SN 时间线")
+                VStack(spacing: 0) {
+                    ForEach(Array(timelineEvents.enumerated()), id: \.element.eventID) { index, event in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: timelineIcon(for: event.kind))
+                                .foregroundStyle(CodeCamTheme.blue)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(timelineTitle(for: event.kind))
+                                    .font(CodeCamTypography.listTitle)
+                                Text(WallClock.dateTime(event.occurredAt))
+                                    .font(CodeCamTypography.listMeta)
+                                    .foregroundStyle(CodeCamTheme.muted)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Spacer()
                         }
+                        .padding(12)
+                        if index < timelineEvents.count - 1 { CodeCamListDivider() }
                     }
                 }
+                .codeCamListCard()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .padding(.bottom, 72)
+        }
+    }
 
-                GroupBox("关联码") {
-                    if relatedScans.isEmpty {
-                        Text("可在「更多」中关联物流快递或其它编码，并继续拍照。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(relatedScans, id: \.id) { related in
-                                NavigationLink {
-                                    RelatedScanCaptureView(relatedScanID: related.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(related.codeValue).font(.body.monospaced())
-                                            Text("\(related.kind.title) · \(WallClock.dateTime(related.createdAt))")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        let relatedMedia = allMedia.filter { $0.relatedScanID == related.id }
-                                        Text("\(relatedMedia.count)")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
+    private func productInfoRows(for capture: CaptureSession) -> [(label: String, value: String)] {
+        let spec = profile.fields.first { $0.name.contains("规格") }?.value
+            ?? profile.fields.first { $0.name.lowercased() == "spec" }?.value
+            ?? "标准配置"
+        let remarkValue = profile.fields.first { $0.name.contains("备注") }?.value ?? "-"
+        return [
+            ("型号", profile.productModel ?? capture.productModel ?? profile.productReference),
+            ("规格", spec),
+            ("备注", remarkValue)
+        ]
+    }
+
+    @ViewBuilder
+    private var relatedCodeSection: some View {
+        if relatedScans.isEmpty {
+            Button {
+                guard !captureIsReadOnly else { return }
+                relatedFlowPresented = true
+            } label: {
+                HStack {
+                    Text("关联码").font(CodeCamTypography.listMeta).foregroundStyle(CodeCamTheme.muted)
+                    Spacer()
+                    Text(captureIsReadOnly ? "无" : "添加")
+                        .font(CodeCamTypography.listTitle)
+                    Image(systemName: "chevron.right").foregroundStyle(CodeCamTheme.muted)
                 }
-
-                GroupBox("备注记录") {
-                    if notes.isEmpty {
-                        Text("尚无备注。新增的每条备注都会单独保留记录时间。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(notes) { note in
-                                NoteRecordCard(note: note)
-                            }
-                        }
-                    }
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CodeCamTheme.line, lineWidth: 1)
                 }
             }
-            .padding()
+            .buttonStyle(.plain)
+            .disabled(captureIsReadOnly)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(relatedScans, id: \.id) { related in
+                    NavigationLink {
+                        RelatedScanCaptureView(relatedScanID: related.id)
+                    } label: {
+                        HStack {
+                            Text("关联码").font(CodeCamTypography.listMeta).foregroundStyle(CodeCamTheme.muted)
+                            Text(related.codeValue).font(.subheadline.monospaced())
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(CodeCamTheme.muted)
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .codeCamListCard()
+        }
+    }
+
+    @ViewBuilder
+    private var captureMediaGrid: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(media) { item in
+                Button { previewMedia = item } label: {
+                    MediaThumbnail(item: item, size: 76)
+                }
+                .buttonStyle(.plain)
+            }
+            if !captureIsReadOnly {
+                Button { beginMediaCapture(.photo) } label: {
+                    Text("＋")
+                        .font(.title2)
+                        .foregroundStyle(CodeCamTheme.blue)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .background(Color(red: 247 / 255, green: 249 / 255, blue: 251 / 255), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4]))
+                                .foregroundStyle(Color(red: 182 / 255, green: 195 / 255, blue: 210 / 255))
+                        }
+                }
+                .buttonStyle(.plain)
+                .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+            }
+        }
+    }
+
+    private var mediaStatusLine: some View {
+        HStack {
+            Text(gpsStatusText)
+                .font(.caption)
+                .foregroundStyle(CodeCamTheme.green)
+            Spacer()
+            let pending = media.filter { $0.syncState != .synced }.count
+            Text(pending > 0 ? "\(pending) 项媒体待上传" : "媒体已就绪")
+                .font(CodeCamTypography.listMeta)
+                .foregroundStyle(CodeCamTheme.muted)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var gpsStatusText: String {
+        if let accuracy = media.compactMap(\.horizontalAccuracy).last {
+            return "GPS 已记录 · 精度 \(Int(accuracy.rounded()))m"
+        }
+        return "GPS 待记录"
+    }
+
+    private func presentProfileFetchFeedback() {
+        let fromPlatform = profile.sourceDescription.contains("EdgeFlow")
+        if fromPlatform { return }
+        let hasCache = (profile.productName ?? executionItem?.productName) != nil
+            || (profile.productModel ?? executionItem?.productModel) != nil
+        if hasCache {
+            alert = AppAlert(title: "当前离线", message: "当前离线，已使用本地缓存产品信息。")
+        } else {
+            alert = AppAlert(title: "产品信息失败", message: "产品信息暂时无法获取，请重试或稍后同步。")
         }
     }
 
     @ViewBuilder
     private func actionBar(capture: CaptureSession, draft: TaskDraft) -> some View {
-        HStack(spacing: 8) {
-            if !captureIsReadOnly {
-                BottomIconAction(title: "拍照", icon: "camera", disabled: !UIImagePickerController.isSourceTypeAvailable(.camera)) {
-                    beginMediaCapture(.photo)
-                }
-                BottomIconAction(title: "录像", icon: "video", disabled: !UIImagePickerController.isSourceTypeAvailable(.camera)) {
-                    beginMediaCapture(.video)
-                }
-            }
-            moreMenu
-            if !captureIsReadOnly {
-                Button("完成") {
+        if captureIsReadOnly {
+            EmptyView()
+        } else {
+            CodeCamBottomActionBar(
+                secondaryTitles: ["拍照", "录像"],
+                primaryTitle: "完成",
+                onSecondary: { index in
+                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+                    beginMediaCapture(index == 0 ? .photo : .video)
+                },
+                onPrimary: {
                     if media.isEmpty && notes.isEmpty && relatedScans.isEmpty {
                         emptyCaptureConfirmationPresented = true
                     } else {
                         finishCapture(capture, draft: draft)
                     }
                 }
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(.tint, in: RoundedRectangle(cornerRadius: 10))
-                .foregroundStyle(.white)
-                .alert("还没有相应记录，确认结束本次扫码吗？", isPresented: $emptyCaptureConfirmationPresented) {
-                    Button("否", role: .cancel) { }
-                    Button("是") { finishCapture(capture, draft: draft) }
-                }
+            )
+            .alert("还没有相应记录，确认结束本次扫码吗？", isPresented: $emptyCaptureConfirmationPresented) {
+                Button("否", role: .cancel) { }
+                Button("是") { finishCapture(capture, draft: draft) }
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.bar)
-    }
-
-    private var moreMenu: some View {
-        Menu {
-            Button("关联扫码", systemImage: "link") {
-                relatedFlowPresented = true
-            }
-            Button("备注", systemImage: "text.bubble") {
-                remark = ""
-                remarksPresented = true
-            }
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: "ellipsis.circle")
-                    .font(.body.weight(.semibold))
-                Text("更多")
-                    .font(.caption)
-            }
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .foregroundStyle(.primary)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-        }
-        .accessibilityLabel("更多")
     }
 
     private var noteEditor: some View {
         NavigationStack {
-            Form {
-                Section("新增备注") { TextEditor(text: $remark).frame(minHeight: 180) }
-            }
-            .navigationTitle("录入备注")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("现场备注")
+                    .font(.subheadline)
+                    .foregroundStyle(CodeCamTheme.muted)
+                TextEditor(text: $remark)
+                    .frame(minHeight: 150)
+                    .padding(10)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(CodeCamTheme.line, lineWidth: 1)
+                    }
+                Spacer(minLength: 0)
+                HStack {
                     Button("取消") { remarksPresented = false }
-                        .buttonStyle(.bordered)
-                    Button("保存备注") { saveRemark() }
-                        .buttonStyle(.borderedProminent)
+                        .foregroundStyle(CodeCamTheme.muted)
+                    Spacer()
+                    Button("保存") { saveRemark() }
+                        .fontWeight(.bold)
                         .disabled(remark.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .background(.bar)
+                .padding(.top, 8)
             }
+            .padding()
+            .navigationTitle("录入备注")
+            .navigationBarTitleDisplayMode(.inline)
+            .codeCamPage()
         }
+        .presentationDetents([.medium])
     }
 
     private func attachRelatedScan(_ scannedValue: String, kind: RelatedScanKind) {
@@ -297,7 +369,7 @@ struct ProductCaptureView: View {
             case .productCode(let code):
                 let related = try TaskDraftService.addRelatedScan(code, kind: kind, to: capture, draft: draft, in: modelContext)
                 relatedDestination = RelatedScanRoute(id: related.id)
-            case .platformPortal:
+            case .platformPortal, .loginChallenge:
                 alert = AppAlert(title: "无法关联", message: "请扫描物流单或其它现场编码，而不是平台入口二维码。")
             }
         } catch {
@@ -312,14 +384,22 @@ struct ProductCaptureView: View {
 
     private func savePhoto(_ image: UIImage, location: MediaLocationSnapshot) {
         guard let capture, let draft else { return }
-        do { try TaskDraftService.addPhoto(image, category: "现场图片", location: location, to: capture, draft: draft, in: modelContext) }
+        do { try TaskDraftService.addPhoto(image, category: nextEvidenceCategory, location: location, to: capture, draft: draft, in: modelContext) }
         catch { alert = AppAlert(title: "图片未保存", message: error.localizedDescription) }
     }
 
     private func saveVideo(_ fileURL: URL, location: MediaLocationSnapshot) {
         guard let capture, let draft else { return }
-        do { try TaskDraftService.addVideo(at: fileURL, category: "现场录像", location: location, to: capture, draft: draft, in: modelContext) }
+        do { try TaskDraftService.addVideo(at: fileURL, category: nextEvidenceCategory, location: location, to: capture, draft: draft, in: modelContext) }
         catch { alert = AppAlert(title: "录像未保存", message: error.localizedDescription) }
+    }
+
+    private var nextEvidenceCategory: String {
+        guard let executionItem else { return "现场图片" }
+        for requirement in executionItem.requiredEvidence {
+            if media.filter({ $0.category == requirement.label }).count < requirement.minimum { return requirement.label }
+        }
+        return executionItem.requiredEvidence.first?.label ?? "现场图片"
     }
 
     private func saveRemark() {
@@ -337,7 +417,30 @@ struct ProductCaptureView: View {
             try TaskDraftService.completeCapture(capture, for: draft, in: modelContext)
             dismiss()
         } catch {
-            alert = AppAlert(title: "无法完成采集", message: error.localizedDescription)
+            alert = AppAlert(title: "无法完成扫码", message: error.localizedDescription)
+        }
+    }
+
+    private func timelineTitle(for kind: String) -> String {
+        switch kind {
+        case "code.scanned": "已扫描 SN"
+        case "media.captured": "已添加照片"
+        case "media.recorded": "已添加录像"
+        case "note.added": "已添加备注"
+        case "related.scanned": "已添加关联码"
+        case "capture.completed": "任务已完成"
+        default: "记录已更新"
+        }
+    }
+
+    private func timelineIcon(for kind: String) -> String {
+        switch kind {
+        case "code.scanned": "barcode.viewfinder"
+        case "media.captured": "camera.fill"
+        case "media.recorded": "video.fill"
+        case "note.added": "text.bubble.fill"
+        case "capture.completed": "checkmark.circle.fill"
+        default: "circle.fill"
         }
     }
 }

@@ -96,6 +96,17 @@ nonisolated struct FixedTaskForm: Codable, Equatable {
     var note = ""
 
     static let empty = FixedTaskForm()
+
+    var eventFields: [String: String] {
+        [
+            "location": location,
+            "contactName": contactName,
+            "note": note,
+            "现场地点": location,
+            "联系人": contactName,
+            "现场说明": note,
+        ]
+    }
 }
 
 enum RelatedScanKind: String, Codable, CaseIterable, Identifiable {
@@ -265,6 +276,45 @@ enum ExecutionItemState: String, Codable, CaseIterable {
     var isOutstanding: Bool { self == .pending || self == .inProgress }
 }
 
+enum TaskPriority: String, Codable, CaseIterable {
+    case urgent = "URGENT"
+    case high = "HIGH"
+    case normal = "NORMAL"
+    case low = "LOW"
+
+    var title: String {
+        switch self {
+        case .urgent: "紧急"
+        case .high: "高优"
+        case .normal: "普通"
+        case .low: "低优"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .urgent: .red
+        case .high: .orange
+        case .normal: .blue
+        case .low: .secondary
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .urgent: 0
+        case .high: 1
+        case .normal: 2
+        case .low: 3
+        }
+    }
+}
+
+struct EvidenceRequirement: Codable, Hashable {
+    let label: String
+    let minimum: Int
+}
+
 enum MediaLocationStatus: String, Codable {
     case available
     case unavailable
@@ -310,6 +360,70 @@ enum WallClock {
     }
 }
 
+struct PlatformEndpoint {
+    static let defaultHost = "192.168.31.5"
+    static let defaultPort = 8000
+
+    var host: String
+    var port: Int
+    var usesHTTPS: Bool
+
+    init(host: String, port: Int, usesHTTPS: Bool = false) {
+        self.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.port = port
+        self.usesHTTPS = usesHTTPS
+    }
+
+    init(url: URL) {
+        usesHTTPS = url.scheme?.lowercased() == "https"
+        host = url.host ?? Self.defaultHost
+        port = url.port ?? (usesHTTPS ? 443 : 80)
+        if port == 80 && !usesHTTPS && url.port == nil {
+            port = Self.defaultPort
+        }
+    }
+
+    static func current() -> PlatformEndpoint {
+        if let url = EdgeFlowClient.baseURL {
+            return PlatformEndpoint(url: url)
+        }
+        return PlatformEndpoint(host: defaultHost, port: defaultPort)
+    }
+
+    var urlString: String {
+        let scheme = usesHTTPS ? "https" : "http"
+        return "\(scheme)://\(host):\(port)"
+    }
+
+    var url: URL? { URL(string: urlString) }
+
+    static func validate(host: String, portText: String) -> String? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedHost.isEmpty { return "请输入服务器地址。" }
+        if trimmedHost.contains("://") { return "只需填写 IP 或域名，不要包含 http://。" }
+        if trimmedHost.contains("/") { return "服务器地址格式不正确。" }
+        guard let port = Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)), port > 0, port <= 65535 else {
+            return "端口应为 1–65535 之间的数字。"
+        }
+        return nil
+    }
+
+    func save() throws {
+        guard let url else { throw EdgeFlowServiceError.invalidBaseURL }
+        UserDefaults.standard.set(url.absoluteString, forKey: EdgeFlowClient.baseURLKey)
+    }
+
+    static func save(host: String, portText: String, usesHTTPS: Bool) throws -> PlatformEndpoint {
+        if let failure = validate(host: host, portText: portText) {
+            throw EdgeFlowServiceError.rejected(status: 400, message: failure)
+        }
+        let port = Int(portText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? defaultPort
+        let endpoint = PlatformEndpoint(host: host, port: port, usesHTTPS: usesHTTPS)
+        try endpoint.save()
+        return endpoint
+    }
+}
+
 struct AppSchema {
     static let models: [any PersistentModel.Type] = [
         UserSessionRecord.self,
@@ -325,5 +439,6 @@ struct AppSchema {
         OutboxItem.self,
         SyncSession.self,
         DeviceRegistration.self,
+        CustomerPendingAction.self,
     ]
 }

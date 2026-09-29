@@ -25,65 +25,168 @@ struct MineView: View {
         return session.displayName.isEmpty ? session.username : session.displayName
     }
 
+    private var roleLine: String {
+        if let factory = registration?.factoryName, !factory.isEmpty {
+            return "质检工程师 · \(factory)"
+        }
+        return "账号与设备连接"
+    }
+
+    private var platformSubtitle: String {
+        guard let registration else { return "未连接" }
+        switch registration.state {
+        case .registered, .online, .offline: return "已连接"
+        case .pairing: return "等待认领"
+        default: return "未连接"
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 19) {
                     NavigationLink {
                         PlatformConnectionView()
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: accountSession?.isAuthenticated == true ? "person.crop.circle.fill" : "person.crop.circle.badge.plus")
-                                .font(.title)
-                                .foregroundStyle(accountSession?.isAuthenticated == true ? .blue : .secondary)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(accountName)
-                                    .font(.headline)
-                                Text(registration?.factoryName ?? "账号与设备连接")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 6) {
-                                StatusCapsule(
-                                    title: accountSession?.isAuthenticated == true ? "已登录" : "未登录",
-                                    tint: accountSession?.isAuthenticated == true ? .green : .secondary
-                                )
-                                DeviceStateBadge(state: registration?.state ?? .unpaired)
-                            }
-                        }
-                        .padding(.vertical, 6)
+                        CodeCamProfileHeader(
+                            initials: String(accountName.prefix(1)),
+                            name: accountName,
+                            roleLine: roleLine,
+                            statusTitle: accountSession?.isAuthenticated == true ? "工位在线" : "等待登录",
+                            isOnline: accountSession?.isAuthenticated == true
+                        )
                     }
-                } header: {
-                    Text("账号与设备")
-                } footer: {
-                    Text("登录并完成认领后，才能拉取「任务」并同步采集数据。")
-                }
+                    .buttonStyle(.plain)
 
-                Section("同步") {
                     NavigationLink {
                         SyncQueueView()
                     } label: {
-                        HStack {
-                            Label("同步队列", systemImage: "arrow.triangle.2.circlepath")
+                        CodeCamSyncSummaryCard(
+                            title: "同步队列",
+                            value: pendingSyncCount > 0 ? "\(pendingSyncCount) 项待上传" : "已全部同步",
+                            subtitle: pendingSyncCount > 0 ? "自动上传中" : "所有记录均已同步",
+                            buttonTitle: "查看",
+                            action: {}
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(spacing: 0) {
+                        NavigationLink {
+                            PlatformConnectionView()
+                        } label: {
+                            CodeCamSettingsRow(icon: "checkmark.shield", title: "平台连接", subtitle: platformSubtitle)
+                        }
+                        .buttonStyle(.plain)
+                        CodeCamListDivider()
+                        NavigationLink {
+                            DeviceRegistrationView()
+                        } label: {
+                            CodeCamSettingsRow(
+                                icon: "rectangle.connected.to.line.below",
+                                title: "设备注册",
+                                subtitle: "工位 ID：\(registration?.serialNumber ?? DeviceIdentity.serialNumber) · \(platformSubtitle)"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        CodeCamListDivider()
+                        NavigationLink {
+                            StorageSettingsView()
+                        } label: {
+                            CodeCamSettingsRow(icon: "internaldrive", title: "数据与存储", subtitle: "查看本机缓存占用")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .codeCamListCard()
+
+                    CodeCamSectionHeader(title: "更多", compactTopSpacing: true)
+                    NavigationLink {
+                        MoreServicesView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text("⋯")
+                                .font(.title3)
+                                .foregroundStyle(CodeCamTheme.blue)
+                                .frame(width: 34, height: 34)
+                                .background(CodeCamTheme.blueSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("更多服务").font(.subheadline.weight(.semibold))
+                                Text("顾客模式与其他辅助入口").font(.caption).foregroundStyle(CodeCamTheme.muted)
+                            }
                             Spacer()
-                            CountBadge(count: pendingSyncCount)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(CodeCamTheme.muted)
+                        }
+                        .padding(13)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(CodeCamTheme.line, lineWidth: 1)
                         }
                     }
-                }
+                    .buttonStyle(.plain)
 
-                Section("关于") {
-                    LabeledContent("设备序列号", value: registration?.serialNumber ?? DeviceIdentity.serialNumber)
-                    LabeledContent("应用版本", value: DeviceIdentity.version)
-                    LabeledContent("服务地址", value: EdgeFlowClient.baseURL?.absoluteString ?? EdgeFlowClient.defaultBaseURL)
+                    Text("CodeCam \(DeviceIdentity.version) · 数据已加密保护")
+                        .font(.caption).foregroundStyle(CodeCamTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
             .navigationTitle("我的")
             .navigationBarTitleDisplayMode(.large)
+            .codeCamPage()
             .task {
                 _ = AccountAuthService.session(in: modelContext)
                 _ = DeviceRegistrationService.registration(in: modelContext)
             }
         }
+    }
+}
+
+struct MoreServicesView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                CodeCamSectionHeader(title: "辅助入口")
+                Button {
+                    AccountAuthService.logout(in: modelContext)
+                    CodeCamAppModeStore.set(.customer)
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("⌂")
+                            .font(.title3)
+                            .foregroundStyle(CodeCamTheme.blue)
+                            .frame(width: 34, height: 34)
+                            .background(CodeCamTheme.blueSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("顾客模式").font(.subheadline.weight(.semibold))
+                            Text("查询产品、订单和售后服务").font(.caption).foregroundStyle(CodeCamTheme.muted)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(CodeCamTheme.muted)
+                    }
+                    .padding(13)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(CodeCamTheme.line, lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .navigationTitle("更多服务")
+        .navigationBarTitleDisplayMode(.inline)
+        .codeCamPage()
     }
 }

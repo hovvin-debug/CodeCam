@@ -39,8 +39,12 @@ private enum AppTab: Hashable {
 private struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var registrations: [DeviceRegistration]
+    // The redesigned capture overview is the staff landing page; task details
+    // remain one tap away without making the app open on the legacy list UI.
     @State private var selectedTab: AppTab = .tasks
     @State private var captureRootID = UUID()
+    @State private var targetExecutionItemID: String?
+    @AppStorage(CodeCamAppModeStore.key) private var appMode = CodeCamAppMode.staff.rawValue
 
     private var registration: DeviceRegistration? {
         registrations.first { $0.terminalID == InstallationIDStore.value }
@@ -59,14 +63,29 @@ private struct MainTabView: View {
     }
 
     var body: some View {
+        if appMode == CodeCamAppMode.customer.rawValue {
+            CustomerModeRootView()
+                .task { _ = AccountAuthService.session(in: modelContext) }
+        } else {
+        staffTabs
+        }
+    }
+
+    private var staffTabs: some View {
         TabView(selection: captureTabSelection) {
-            TodayTasksView()
+            TodayTasksView { itemID in
+                targetExecutionItemID = itemID
+                selectedTab = .capture
+            }
                 .tabItem { Label("任务", systemImage: "checklist") }
                 .tag(AppTab.tasks)
 
-            ContentView()
+            ContentView(
+                targetExecutionItemID: $targetExecutionItemID,
+                onOpenRecords: { selectedTab = .records }
+            )
                 .id(captureRootID)
-                .tabItem { Label("采集", systemImage: "barcode.viewfinder") }
+                .tabItem { Label("扫码", systemImage: "barcode.viewfinder") }
                 .tag(AppTab.capture)
 
             RecordsView()
@@ -77,6 +96,9 @@ private struct MainTabView: View {
                 .tabItem { Label("我的", systemImage: "person.crop.circle") }
                 .tag(AppTab.mine)
         }
+        .tint(CodeCamTheme.blue)
+        .toolbarBackground(CodeCamTheme.canvas, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .task {
             TaskBootstrapper.seedIfNeeded(in: modelContext)
             _ = DeviceRegistrationService.registration(in: modelContext)

@@ -8,17 +8,12 @@ import UIKit
 @MainActor
 enum TaskBootstrapper {
     static func seedIfNeeded(in context: ModelContext) {
-        let descriptor = FetchDescriptor<TaskDraft>()
-        if (try? context.fetchCount(descriptor)) == 0 {
+        let sessionDescriptor = FetchDescriptor<UserSessionRecord>()
+        if (try? context.fetchCount(sessionDescriptor)) == 0 {
             let installationID = InstallationIDStore.value
             context.insert(UserSessionRecord(userID: "anonymous", terminalID: installationID, installationID: installationID))
             context.insert(DeviceRegistration(terminalID: installationID, serialNumber: DeviceIdentity.serialNumber))
-            context.insert(TaskCache(taskID: "install-001", templateID: "installation-v1", templateVersion: "1.0"))
-            context.insert(TaskDraft(taskID: "install-001", title: "安装验收 · A 区 1201", taskType: "安装", templateID: "installation-v1", templateVersion: "1.0"))
-            context.insert(TaskDraft(taskID: "service-002", title: "售后巡检 · 东仓", taskType: "售后", templateID: "after-service-v1", templateVersion: "1.0"))
-            context.insert(TaskDraft(taskID: "logistics-003", title: "物流签收 · 华东线", taskType: "物流", templateID: "delivery-v1", templateVersion: "1.0"))
         }
-        ExecutionListService.seedTodayIfNeeded(in: context)
         try? context.save()
     }
 }
@@ -116,6 +111,7 @@ enum ExecutionListService {
             assignmentDescription: (listObject["assignment"] as? String) ?? "当前设备"
         )
         if list.modelContext == nil { context.insert(list) }
+        let previousVersion = list.sourceVersion
         list.title = (listObject["title"] as? String) ?? list.title
         list.sourceVersion = (listObject["version"] as? String) ?? list.sourceVersion
         list.assignmentDescription = (listObject["assignment"] as? String) ?? list.assignmentDescription
@@ -123,6 +119,7 @@ enum ExecutionListService {
         list.updatedAt = .now
 
         let payloadItems = (listObject["items"] as? [[String: Any]]) ?? []
+        let incomingItemIDs = Set(payloadItems.compactMap { ($0["workItemId"] as? String) ?? ($0["id"] as? String) })
         var drafts = (try? context.fetch(FetchDescriptor<TaskDraft>())) ?? []
         for payload in payloadItems {
             guard let workItemID = (payload["workItemId"] as? String) ?? (payload["id"] as? String),
@@ -149,8 +146,19 @@ enum ExecutionListService {
                 return created
             }()
             let itemDescriptor = FetchDescriptor<ExecutionItem>(predicate: #Predicate { $0.id == workItemID })
-            let item = (try? context.fetch(itemDescriptor).first) ?? ExecutionItem(id: workItemID, listID: list.id, draftID: draft.id, codeValue: code)
+            let existingItem = try? context.fetch(itemDescriptor).first
+            let item = existingItem ?? ExecutionItem(id: workItemID, listID: list.id, draftID: draft.id, codeValue: code)
             if item.modelContext == nil { context.insert(item) }
+            let incomingTemplateVersion = (payload["templateVersion"] as? String) ?? draft.templateVersion
+            let hasLocalCapture = item.captureID != nil || item.state == .inProgress || item.state == .captured
+            if existingItem != nil, !item.templateVersion.isEmpty, item.templateVersion != incomingTemplateVersion {
+                item.changeNotice = hasLocalCapture
+                    ? "任务模板已更新；已开始的采集继续保留原模板上下文。"
+                    : "任务模板已更新，请确认新的采集要求。"
+            }
+            if !hasLocalCapture {
+                draft.templateVersion = incomingTemplateVersion
+            }
             item.listID = list.id
             item.draftID = draft.id
             item.codeID = (payload["codeId"] as? String) ?? item.codeID
@@ -158,10 +166,51 @@ enum ExecutionListService {
             item.productName = (payload["productName"] as? String) ?? item.productName
             item.productModel = (payload["productModel"] as? String) ?? (payload["model"] as? String) ?? item.productModel
             item.orderSummary = (payload["orderSummary"] as? String) ?? (payload["orderNo"] as? String) ?? item.orderSummary
+            item.templateVersion = incomingTemplateVersion
+            item.priority = TaskPriority(rawValue: ((payload["priority"] as? String) ?? "NORMAL").uppercased()) ?? .normal
+            item.dueAt = (payload["dueAt"] as? String).flatMap(PlatformDateParser.parse)
+            item.taskStateRaw = (payload["taskState"] as? String) ?? item.taskStateRaw
+            if let requirements = payload["requirements"] as? [String: Any] {
+                let evidence = (requirements["evidence"] as? [[String: Any]] ?? []).compactMap { entry -> String? in
+                    guard let label = entry["label"] as? String, !label.isEmpty else { return nil }
+                    let minimum = entry["minimum"] as? Int ?? 1
+                    return "\(label) ≥ \(minimum)"
+                }
+                let fields = (requirements["fields"] as? [String] ?? []).filter { !$0.isEmpty }
+                if let evidenceData = try? JSONSerialization.data(withJSONObject: requirements["evidence"] ?? []),
+                   let encodedEvidence = String(data: evidenceData, encoding: .utf8) {
+                    item.requiredEvidenceJSON = encodedEvidence
+                }
+                let evidenceCount = requirements["evidenceCount"] as? Int ?? evidence.count
+                let fieldCount = requirements["fieldCount"] as? Int ?? fields.count
+                let parts = evidence + fields.map { "填写：\($0)" }
+                item.requirementSummary = parts.isEmpty
+                    ? "无额外采集要求"
+                    : parts.joined(separator: " · ") + "（" + String(evidenceCount) + " 项取证，" + String(fieldCount) + " 项填写）"
+            }
+            if let changeNotice = payload["changeNotice"] as? String, !changeNotice.isEmpty {
+                item.changeNotice = changeNotice
+            }
             if let rawState = payload["status"] as? String, let state = ExecutionItemState(rawValue: rawState.uppercased()) {
-                item.state = state
+                if state == .cancelled || !hasLocalCapture || state != .pending {
+                    item.state = state
+                }
             }
             item.updatedAt = .now
+        }
+        if previousVersion != list.sourceVersion {
+            let localItems = (try? context.fetch(FetchDescriptor<ExecutionItem>())) ?? []
+            let missingItems = localItems.filter {
+                $0.listID == list.id && !incomingItemIDs.contains($0.id) && ($0.captureID != nil || $0.state == .inProgress || $0.state == .captured)
+            }
+            for item in missingItems where (item.changeNotice ?? "").isEmpty {
+                item.changeNotice = "该任务已从最新清单移除；本地采集记录已保留。"
+            }
+            if !missingItems.isEmpty {
+                list.lastChangeNotice = "清单已更新：" + String(missingItems.count) + " 项本地任务不再出现在最新清单中。"
+            } else {
+                list.lastChangeNotice = "清单已更新，请留意任务要求和优先级。"
+            }
         }
         try context.save()
     }
@@ -169,6 +218,56 @@ enum ExecutionListService {
 
 @MainActor
 enum TaskDraftService {
+    /// Creates the v1 local-first unit of work: exactly one task row for one external SN.
+    static func createScannedTask(_ code: String, in context: ModelContext) throws -> (ExecutionItem, CaptureSession) {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let failure = CodeValidator.validate(normalized) {
+            throw TaskDraftServiceError.invalidCode(failure)
+        }
+
+        let captures = (try? context.fetch(FetchDescriptor<CaptureSession>())) ?? []
+        if let existingCapture = captures.first(where: {
+            !$0.isCompleted && $0.codeValue.compare(normalized, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }), let itemID = existingCapture.executionItemID {
+            let items = (try? context.fetch(FetchDescriptor<ExecutionItem>())) ?? []
+            if let existingItem = items.first(where: { $0.id == itemID }) {
+                return (existingItem, existingCapture)
+            }
+        }
+
+        let key = ExecutionListService.todayKey()
+        let lists = (try? context.fetch(FetchDescriptor<ExecutionList>())) ?? []
+        let list: ExecutionList
+        if let existing = lists.first(where: { $0.workDateKey == key }) {
+            list = existing
+        } else {
+            list = ExecutionList(workDateKey: key, title: "今日扫码任务", assignmentDescription: "CodeCam 本地")
+            context.insert(list)
+        }
+
+        let taskID = ClientEventIdentity.make()
+        let draft = TaskDraft(
+            taskID: taskID,
+            title: normalized,
+            taskType: "SN_EVIDENCE",
+            templateID: "codecam-sn-v1",
+            templateVersion: "1.0"
+        )
+        draft.codeValue = normalized
+        draft.codeValidation = .locallyValid
+        context.insert(draft)
+
+        let item = ExecutionItem(
+            listID: list.id,
+            draftID: draft.id,
+            codeValue: normalized,
+            state: .pending
+        )
+        context.insert(item)
+        let capture = try startCapture(normalized, for: draft, executionItem: item, in: context)
+        return (item, capture)
+    }
+
     static func startCapture(_ code: String, for draft: TaskDraft, executionItem: ExecutionItem? = nil, in context: ModelContext) throws -> CaptureSession {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         if let failure = CodeValidator.validate(trimmedCode) {
@@ -199,10 +298,17 @@ enum TaskDraftService {
         draft.form = form
         draft.syncState = .queued
         draft.updatedAt = .now
+        var eventPayload: [String: Any] = [
+            "templateId": draft.templateID,
+            "templateVersion": draft.templateVersion,
+        ]
+        if submitting {
+            eventPayload["fields"] = form.eventFields
+        }
         recordEvent(
             kind: submitting ? "form.submitted" : "form.saved",
             draft: draft,
-            payload: ["templateId": draft.templateID, "templateVersion": draft.templateVersion],
+            payload: eventPayload,
             enqueue: true,
             in: context
         )
@@ -309,6 +415,21 @@ enum TaskDraftService {
 
     static func completeCapture(_ capture: CaptureSession, for draft: TaskDraft, in context: ModelContext) throws {
         guard !capture.isCompleted else { return }
+        if let executionItemID = capture.executionItemID {
+            let itemDescriptor = FetchDescriptor<ExecutionItem>(predicate: #Predicate { $0.id == executionItemID })
+            if let item = try? context.fetch(itemDescriptor).first {
+                let captureID: String? = capture.id
+                let mediaDescriptor = FetchDescriptor<LocalMedia>(predicate: #Predicate<LocalMedia> { media in
+                    media.captureID == captureID
+                })
+                let localMedia = (try? context.fetch(mediaDescriptor))?.filter { !$0.isRelatedMedia } ?? []
+                let missing = item.requiredEvidence.compactMap { requirement -> String? in
+                    let available = localMedia.filter { $0.category == requirement.label }.count
+                    return available < requirement.minimum ? "\(requirement.label)（还差 \(requirement.minimum - available) 项）" : nil
+                }
+                if !missing.isEmpty { throw TaskDraftServiceError.missingEvidence(missing) }
+            }
+        }
         capture.completedAt = .now
         capture.updatedAt = .now
         ExecutionListService.markCaptured(for: capture, in: context)
@@ -349,7 +470,7 @@ enum TaskDraftService {
         return payload
     }
 
-    private static func recordEvent(kind: String, draft: TaskDraft, captureID: String? = nil, codeValue: String? = nil, payload: [String: String], enqueue: Bool, in context: ModelContext) {
+    private static func recordEvent(kind: String, draft: TaskDraft, captureID: String? = nil, codeValue: String? = nil, payload: [String: Any], enqueue: Bool, in context: ModelContext) {
         let eventID = ClientEventIdentity.make()
         var enrichedPayload = payload
         if let captureID {
@@ -362,7 +483,7 @@ enum TaskDraftService {
                 enrichedPayload["codeValue"] = capture.codeValue
             }
         }
-        let data = (try? JSONEncoder().encode(enrichedPayload)) ?? Data("{}".utf8)
+        let data = (try? JSONSerialization.data(withJSONObject: enrichedPayload)) ?? Data("{}".utf8)
         let body = String(decoding: data, as: UTF8.self)
         let event = LocalEvent(eventID: eventID, draftID: draft.id, captureID: captureID, kind: kind, codeValue: codeValue ?? draft.codeValue, payloadJSON: body)
         context.insert(event)
@@ -380,6 +501,7 @@ enum TaskDraftServiceError: LocalizedError {
     case codeRequired
     case emptyNote
     case relatedCodeIsProductSN
+    case missingEvidence([String])
 
     var errorDescription: String? {
         switch self {
@@ -388,6 +510,7 @@ enum TaskDraftServiceError: LocalizedError {
         case .codeRequired: "请先扫描或输入有效产品码，再继续采集。"
         case .emptyNote: "备注不能为空。"
         case .relatedCodeIsProductSN: "关联码不能与当前产品序列号相同。"
+        case .missingEvidence(let items): "请先补齐：\(items.joined(separator: "、"))。"
         }
     }
 }
@@ -404,24 +527,52 @@ struct StoredMedia {
 /// Media files live under Application Support. We persist relative file names so paths
 /// survive container UUID changes after reinstall / Xcode redeploy.
 enum MediaFileStore {
-    private static let maximumPhotoEdge: CGFloat = 1_920
-    private static let photoCompressionQuality: CGFloat = 0.74
+    private static let defaultMaximumPhotoEdge: CGFloat = 720
+    private static let defaultPhotoCompressionQuality: CGFloat = 0.78
+    private static let defaultThumbnailMaximumBytes = 262_144
+
+    private static var thumbnailMaximumEdge: CGFloat {
+        let value = UserDefaults.standard.double(forKey: "thumbnail.maxEdge")
+        return value > 0 ? min(max(value, 160), 2048) : defaultMaximumPhotoEdge
+    }
+
+    private static var thumbnailQuality: CGFloat {
+        let value = UserDefaults.standard.double(forKey: "thumbnail.quality")
+        return value > 0 ? min(max(value, 0.35), 0.95) : defaultPhotoCompressionQuality
+    }
+
+    private static var thumbnailMaximumBytes: Int {
+        let value = UserDefaults.standard.integer(forKey: "thumbnail.maxBytes")
+        return value > 0 ? min(max(value, 32 * 1024), 1024 * 1024) : defaultThumbnailMaximumBytes
+    }
+
+    private static var photoCompressionQuality: CGFloat {
+        defaultPhotoCompressionQuality
+    }
+
+    static func applyThumbnailPolicy(_ object: [String: Any]) {
+        guard let image = object["image"] as? [String: Any] else { return }
+        if let value = image["maxEdge"] as? NSNumber { UserDefaults.standard.set(value.doubleValue, forKey: "thumbnail.maxEdge") }
+        if let value = image["quality"] as? NSNumber { UserDefaults.standard.set(value.doubleValue, forKey: "thumbnail.quality") }
+        if let value = image["maxBytes"] as? NSNumber { UserDefaults.standard.set(value.intValue, forKey: "thumbnail.maxBytes") }
+        if let value = object["version"] as? NSNumber { UserDefaults.standard.set(value.intValue, forKey: "thumbnail.policyVersion") }
+    }
 
     static func store(image: UIImage, mediaID: String) throws -> StoredMedia {
-        let storedImage = image.scaledToFit(maximumEdge: maximumPhotoEdge)
+        let storedImage = image.scaledToFit(maximumEdge: max(thumbnailMaximumEdge, 1920))
         guard let originalData = storedImage.jpegData(compressionQuality: photoCompressionQuality) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        let thumbnailImage = storedImage.preparingThumbnail(of: CGSize(width: 480, height: 480)) ?? storedImage
-        guard let thumbnailData = thumbnailImage.jpegData(compressionQuality: 0.72) else {
+        let thumbnailImage = storedImage.scaledToFit(maximumEdge: thumbnailMaximumEdge)
+        guard let thumbnailData = boundedJPEGData(image: thumbnailImage, quality: thumbnailQuality, maxBytes: thumbnailMaximumBytes) else {
             throw CocoaError(.fileWriteUnknown)
         }
 
         let directory = try mediaDirectory()
         let originalName = "\(mediaID).jpg"
         let thumbnailName = "\(mediaID)-thumb.jpg"
-        try originalData.write(to: directory.appendingPathComponent(originalName), options: .atomic)
-        try thumbnailData.write(to: directory.appendingPathComponent(thumbnailName), options: .atomic)
+        try originalData.write(to: directory.appendingPathComponent(originalName), options: Data.WritingOptions.atomic)
+        try thumbnailData.write(to: directory.appendingPathComponent(thumbnailName), options: Data.WritingOptions.atomic)
         let checksum = SHA256.hash(data: originalData).map { String(format: "%02x", $0) }.joined()
 
         return StoredMedia(
@@ -439,13 +590,14 @@ enum MediaFileStore {
         let directory = try mediaDirectory()
         let originalName = "\(mediaID).mov"
         let thumbnailName = "\(mediaID)-thumb.jpg"
-        try videoData.write(to: directory.appendingPathComponent(originalName), options: .atomic)
+        try videoData.write(to: directory.appendingPathComponent(originalName), options: Data.WritingOptions.atomic)
 
         let thumbnail = videoThumbnail(for: sourceURL) ?? UIImage(systemName: "video") ?? UIImage()
-        guard let thumbnailData = thumbnail.jpegData(compressionQuality: 0.72) else {
+        let resizedThumbnail = thumbnail.scaledToFit(maximumEdge: thumbnailMaximumEdge)
+        guard let thumbnailData = boundedJPEGData(image: resizedThumbnail, quality: thumbnailQuality, maxBytes: thumbnailMaximumBytes) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        try thumbnailData.write(to: directory.appendingPathComponent(thumbnailName), options: .atomic)
+        try thumbnailData.write(to: directory.appendingPathComponent(thumbnailName), options: Data.WritingOptions.atomic)
         let checksum = SHA256.hash(data: videoData).map { String(format: "%02x", $0) }.joined()
 
         return StoredMedia(
@@ -453,8 +605,8 @@ enum MediaFileStore {
             originalPath: originalName,
             thumbnailPath: thumbnailName,
             checksum: checksum,
-            pixelWidth: Int(thumbnail.size.width * thumbnail.scale),
-            pixelHeight: Int(thumbnail.size.height * thumbnail.scale)
+            pixelWidth: Int(resizedThumbnail.size.width * resizedThumbnail.scale),
+            pixelHeight: Int(resizedThumbnail.size.height * resizedThumbnail.scale)
         )
     }
 
@@ -523,6 +675,15 @@ enum MediaFileStore {
         generator.appliesPreferredTrackTransform = true
         guard let image = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
         return UIImage(cgImage: image)
+    }
+
+    private static func boundedJPEGData(image: UIImage, quality: CGFloat, maxBytes: Int) -> Data? {
+        var currentQuality = quality
+        for _ in 0..<6 {
+            if let data = image.jpegData(compressionQuality: currentQuality), data.count <= maxBytes { return data }
+            currentQuality -= 0.08
+        }
+        return image.jpegData(compressionQuality: 0.35)
     }
 }
 
@@ -633,8 +794,7 @@ struct KeychainError: LocalizedError {
 
 enum DeviceIdentity {
     static var serialNumber: String {
-        let suffix = InstallationIDStore.value.replacingOccurrences(of: "-", with: "").prefix(8).uppercased()
-        return "CODECAM-\(suffix)"
+        EntityCode.codeCamSerial(terminalId: InstallationIDStore.value)
     }
 
     static var version: String {
@@ -691,6 +851,13 @@ enum EdgeFlowClient {
     static let deviceTokenAccount = "edgeflow-device-token"
     static let userTokenAccount = "edgeflow-user-token"
 
+    private static let mediaUploadSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 600
+        return URLSession(configuration: configuration)
+    }()
+
     enum TokenKind {
         case none
         case device
@@ -730,11 +897,75 @@ enum EdgeFlowClient {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { throw EdgeFlowServiceError.localMediaMissing }
         var request = URLRequest(url: uploadURL)
         request.httpMethod = method
-        for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
-        let (_, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw EdgeFlowServiceError.rejected(status: (response as? HTTPURLResponse)?.statusCode ?? -1, message: "对象存储未接受媒体文件。")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        for (field, value) in headers where !value.isEmpty {
+            request.setValue(value, forHTTPHeaderField: field)
         }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await mediaUploadSession.upload(for: request, fromFile: fileURL)
+        } catch {
+            throw EdgeFlowServiceError.rejected(status: -1, message: mediaUploadConnectionMessage(error, host: uploadURL.host))
+        }
+        guard let http = response as? HTTPURLResponse else { throw EdgeFlowServiceError.invalidResponse }
+        guard 200..<300 ~= http.statusCode else {
+            throw EdgeFlowServiceError.rejected(
+                status: http.statusCode,
+                message: mediaUploadHTTPMessage(status: http.statusCode, body: data, host: uploadURL.host)
+            )
+        }
+    }
+
+    private static func mediaUploadConnectionMessage(_ error: Error, host: String?) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet:
+                return "上传时无网络连接，请检查 Wi‑Fi 或蜂窝数据。"
+            case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+                let target = host ?? "对象存储"
+                return "无法解析上传地址（\(target)），请检查 DNS 或网络。"
+            case NSURLErrorTimedOut:
+                return "上传超时，文件较大时可稍后重试。"
+            case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted:
+                return "上传 HTTPS 连接失败，请检查系统时间是否正确。"
+            default:
+                break
+            }
+        }
+        return "上传连接失败：\(error.localizedDescription)"
+    }
+
+    private static func mediaUploadHTTPMessage(status: Int, body: Data, host: String?) -> String {
+        let text = String(data: body, encoding: .utf8) ?? String(data: body, encoding: .ascii)
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isCOS = (host ?? "").contains("myqcloud.com")
+        if trimmed.contains("SignatureDoesNotMatch") {
+            return "COS 签名无效（\(status)），请重启 EdgeFlow 后重试同步。"
+        }
+        if trimmed.contains("InvalidAccessKeyId") {
+            return "COS 临时密钥无效（\(status)），请重试同步。"
+        }
+        if trimmed.contains("AccessDenied") || trimmed.contains("Access Denied") {
+            return "COS 拒绝上传（\(status)），请检查存储桶权限。"
+        }
+        if !trimmed.isEmpty {
+            return "媒体上传失败（\(status)）：\(String(trimmed.prefix(200)))"
+        }
+        if isCOS {
+            return "COS 上传失败（HTTP \(status)）。"
+        }
+        return "媒体上传失败（HTTP \(status)），请确认 App 中平台地址正确。"
+    }
+
+    static func uploadMultipart(path: String, fileData: Data, fileName: String, contentType: String, token: TokenKind) async throws -> [String: Any] {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = try request(path: path, method: "POST", token: token)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8)
+        body.append(fileData); body.append(Data("\r\n--\(boundary)--\r\n".utf8)); request.httpBody = body
+        return try await performJSON(request)
     }
 
     private static func request(path: String, method: String, token: TokenKind) throws -> URLRequest {
@@ -753,6 +984,9 @@ enum EdgeFlowClient {
            let tokenData = try? KeychainStore.read(account: account),
            let bearer = String(data: tokenData, encoding: .utf8), !bearer.isEmpty {
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+            if account == deviceTokenAccount {
+                request.setValue(bearer, forHTTPHeaderField: "X-Terminal-Token")
+            }
         }
         return request
     }
@@ -791,6 +1025,16 @@ enum EdgeFlowClient {
     }
 }
 
+enum QRLoginService {
+    static func approve(challenge: String) async throws -> [String: Any] {
+        try await EdgeFlowClient.post(
+            "/api/v1/auth/qr-login/challenge/\(challenge)/approve",
+            body: [:],
+            token: .user
+        )
+    }
+}
+
 @MainActor
 enum AccountAuthService {
     static func session(in context: ModelContext) -> UserSessionRecord {
@@ -807,7 +1051,7 @@ enum AccountAuthService {
         return created
     }
 
-    static func register(username: String, password: String, displayName: String, in context: ModelContext) async throws {
+    static func register(username: String, password: String, displayName: String, contextType: String = "STAFF", in context: ModelContext) async throws {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         if let failure = AccountCredentialsValidator.validateUsername(trimmedUsername) {
@@ -826,14 +1070,14 @@ enum AccountAuthService {
                 "username": trimmedUsername,
                 "password": password,
                 "displayName": trimmedDisplayName,
-                "contextType": "STAFF",
+                "contextType": contextType,
             ],
             token: .none
         )
-        try apply(object, username: trimmedUsername, displayName: trimmedDisplayName, in: context)
+        try apply(object, username: trimmedUsername, displayName: trimmedDisplayName, contextType: contextType, in: context)
     }
 
-    static func login(username: String, password: String, in context: ModelContext) async throws {
+    static func login(username: String, password: String, contextType: String = "STAFF", in context: ModelContext) async throws {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         if let failure = AccountCredentialsValidator.validateUsername(trimmedUsername) {
             throw EdgeFlowServiceError.rejected(status: 400, message: failure)
@@ -847,7 +1091,7 @@ enum AccountAuthService {
             body: [
                 "username": trimmedUsername,
                 "password": password,
-                "contextType": "STAFF",
+                "contextType": contextType,
             ],
             token: .none
         )
@@ -856,7 +1100,7 @@ enum AccountAuthService {
             object,
             username: trimmedUsername,
             displayName: (displayName?.isEmpty == false ? displayName! : trimmedUsername),
-            in: context
+            contextType: contextType, in: context
         )
     }
 
@@ -873,7 +1117,7 @@ enum AccountAuthService {
         try? context.save()
     }
 
-    private static func apply(_ object: [String: Any], username: String, displayName: String, in context: ModelContext) throws {
+    private static func apply(_ object: [String: Any], username: String, displayName: String, contextType: String, in context: ModelContext) throws {
         guard let userID = object["userId"] as? String, !userID.isEmpty else {
             throw EdgeFlowServiceError.invalidResponse
         }
@@ -887,6 +1131,7 @@ enum AccountAuthService {
         session.username = username
         session.displayName = (object["displayName"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? displayName
         session.platformOperator = (object["platformOperator"] as? Bool) ?? false
+        session.contextTypeRaw = (object["contextType"] as? String) ?? contextType
         session.isAuthenticated = true
         session.updatedAt = .now
         try context.save()
@@ -895,6 +1140,8 @@ enum AccountAuthService {
 
 @MainActor
 enum DeviceRegistrationService {
+    private static var finishConnectionTasks: [String: Task<Bool, Error>] = [:]
+
     static func registration(in context: ModelContext) -> DeviceRegistration {
         let terminalID = InstallationIDStore.value
         let descriptor = FetchDescriptor<DeviceRegistration>(predicate: #Predicate { $0.terminalID == terminalID })
@@ -906,6 +1153,7 @@ enum DeviceRegistrationService {
     }
 
     static func beginPairing(_ registration: DeviceRegistration, in context: ModelContext, forceRefresh: Bool = false) async throws {
+        KeychainStore.delete(account: EdgeFlowClient.deviceTokenAccount)
         registration.state = .pairing
         registration.lastError = nil
         registration.updatedAt = .now
@@ -918,7 +1166,7 @@ enum DeviceRegistrationService {
         registration.state = nextState
         registration.updatedAt = .now
         try context.save()
-        if nextState == .claimed || nextState == .registered || nextState == .online || deviceTokenExists {
+        if nextState == .claimed || nextState == .registered || nextState == .online {
             _ = try await finishConnection(registration, in: context)
         }
     }
@@ -950,14 +1198,28 @@ enum DeviceRegistrationService {
         if nextState == .pairing {
             return false
         }
-        if nextState == .claimed || nextState == .registered || nextState == .online || deviceTokenExists {
-            return try await finishConnection(registration, in: context)
+        if nextState == .claimed {
+            return false
         }
         return nextState == .registered || nextState == .online
     }
 
     @discardableResult
     static func finishConnection(_ registration: DeviceRegistration, in context: ModelContext) async throws -> Bool {
+        let terminalID = registration.terminalID
+        if let existing = finishConnectionTasks[terminalID] {
+            return try await existing.value
+        }
+        let task = Task { @MainActor in
+            defer { finishConnectionTasks[terminalID] = nil }
+            return try await performFinishConnection(registration, in: context)
+        }
+        finishConnectionTasks[terminalID] = task
+        return try await task.value
+    }
+
+    @discardableResult
+    private static func performFinishConnection(_ registration: DeviceRegistration, in context: ModelContext) async throws -> Bool {
         if registration.state == .online {
             return true
         }
@@ -965,24 +1227,39 @@ enum DeviceRegistrationService {
             try await sendHeartbeat(registration, in: context)
             return registration.state == .online || registration.state == .registered
         }
-        if !deviceTokenExists {
-            // Ask status again so the platform can mint a bootstrap token.
-            var items = [URLQueryItem(name: "terminalId", value: registration.terminalID)]
-            if let pairingID = registration.pairingID {
-                items.append(URLQueryItem(name: "pairingId", value: pairingID))
-            }
-            let object = try await EdgeFlowClient.get("/api/terminal/v1/pair/status", queryItems: items, usesDeviceToken: false)
-            apply(object, to: registration)
-            registration.state = state(in: object, fallback: registration.state)
-            registration.updatedAt = .now
-            try context.save()
+        try await syncDeviceToken(for: registration, in: context)
+        try await registerWithRetry(registration, in: context)
+        try await sendHeartbeat(registration, in: context)
+        return registration.state == .online || registration.state == .registered
+    }
+
+    private static func syncDeviceToken(for registration: DeviceRegistration, in context: ModelContext) async throws {
+        var items = [URLQueryItem(name: "terminalId", value: registration.terminalID)]
+        if let pairingID = registration.pairingID {
+            items.append(URLQueryItem(name: "pairingId", value: pairingID))
         }
+        let object = try await EdgeFlowClient.get(
+            "/api/terminal/v1/pair/status",
+            queryItems: items,
+            usesDeviceToken: deviceTokenExists
+        )
+        apply(object, to: registration)
+        registration.state = state(in: object, fallback: registration.state)
+        registration.updatedAt = .now
+        try context.save()
         guard deviceTokenExists else {
             throw EdgeFlowServiceError.rejected(status: 401, message: "尚未拿到设备凭证，请稍后再试或刷新验证码。")
         }
-        try await register(registration, in: context)
-        try await sendHeartbeat(registration, in: context)
-        return registration.state == .online || registration.state == .registered
+    }
+
+    private static func registerWithRetry(_ registration: DeviceRegistration, in context: ModelContext) async throws {
+        do {
+            try await register(registration, in: context)
+        } catch let error as EdgeFlowServiceError {
+            guard case .rejected(let status, _) = error, status == 401 else { throw error }
+            try await syncDeviceToken(for: registration, in: context)
+            try await register(registration, in: context)
+        }
     }
 
     static func register(_ registration: DeviceRegistration, in context: ModelContext) async throws {
@@ -995,6 +1272,7 @@ enum DeviceRegistrationService {
         registration.updatedAt = .now
         try context.save()
         try? await refreshStorageConfig(registration, in: context)
+        try? await refreshThumbnailPolicy()
     }
 
     static func sendHeartbeat(_ registration: DeviceRegistration, in context: ModelContext) async throws {
@@ -1023,6 +1301,7 @@ enum DeviceRegistrationService {
             registration.updatedAt = .now
             try context.save()
             try? await refreshStorageConfig(registration, in: context)
+            try? await refreshThumbnailPolicy()
         } catch let error as EdgeFlowServiceError {
             if case .rejected(let status, _) = error, status == 401 || status == 403 {
                 if try await refreshDeviceToken(registration, in: context) {
@@ -1039,6 +1318,15 @@ enum DeviceRegistrationService {
         applyStorage(object, to: registration)
         registration.updatedAt = .now
         try context.save()
+    }
+
+    static func refreshThumbnailPolicy() async throws {
+        let object = try await EdgeFlowClient.get("/api/terminal/v1/media-policy")
+        if let policy = object["policy"] as? [String: Any] {
+            MediaFileStore.applyThumbnailPolicy(policy)
+        } else {
+            MediaFileStore.applyThumbnailPolicy(object)
+        }
     }
 
     /// Soft connectivity loss: keep the device recoverable without showing “连接异常”.
@@ -1062,6 +1350,10 @@ enum DeviceRegistrationService {
     }
 
     @discardableResult
+    static func refreshCredentials(_ registration: DeviceRegistration, in context: ModelContext) async throws -> Bool {
+        try await refreshDeviceToken(registration, in: context)
+    }
+
     private static func refreshDeviceToken(_ registration: DeviceRegistration, in context: ModelContext) async throws -> Bool {
         guard deviceTokenExists else { return false }
         let serial = registration.serialNumber.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? registration.serialNumber
@@ -1119,14 +1411,22 @@ enum DeviceRegistrationService {
     }
 
     private static func apply(_ object: [String: Any], to registration: DeviceRegistration) {
+        if let serial = (object["serialNumber"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !serial.isEmpty {
+            registration.serialNumber = serial
+        }
         registration.pairingID = (object["pairingId"] as? String) ?? (object["pairId"] as? String) ?? registration.pairingID
         registration.verificationCode = (object["verificationCode"] as? String) ?? (object["pairingCode"] as? String) ?? (object["code"] as? String) ?? registration.verificationCode
         registration.factoryName = (object["factoryName"] as? String) ?? (object["factory"] as? String) ?? registration.factoryName
         if let expiresAt = object["expiresAt"] as? String {
             registration.pairingExpiresAt = PlatformDateParser.parse(expiresAt)
         }
-        let token = (object["deviceToken"] as? String) ?? (object["accessToken"] as? String) ?? (object["token"] as? String)
-        if let token, !token.isEmpty { try? KeychainStore.save(Data(token.utf8), account: EdgeFlowClient.deviceTokenAccount) }
+        let token = (object["deviceToken"] as? String)
+            ?? (object["terminalToken"] as? String)
+            ?? (object["accessToken"] as? String)
+            ?? (object["token"] as? String)
+        if let token, !token.isEmpty {
+            try? KeychainStore.save(Data(token.utf8), account: EdgeFlowClient.deviceTokenAccount)
+        }
         applyStorage(object, to: registration)
     }
 
@@ -1197,13 +1497,18 @@ enum EdgeFlowSyncService {
         if changed { try? context.save() }
     }
 
-    static func syncAll(in context: ModelContext) async throws -> Int {
+    static func syncAll(in context: ModelContext, forceRetry: Bool = false) async throws -> Int {
         let registration = DeviceRegistrationService.registration(in: context)
         guard registration.state == .registered || registration.state == .online || registration.state == .offline else {
             throw EdgeFlowServiceError.rejected(status: 401, message: "请先完成设备注册，再同步现场数据。")
         }
+        if registration.state == .offline {
+            try? await DeviceRegistrationService.sendHeartbeat(registration, in: context)
+        }
         healAllMediaPaths(in: context)
-        reclaimRetriableItems(in: context)
+        healMissingOutboxItems(in: context)
+        healStaleEventSyncState(in: context)
+        reclaimRetriableItems(in: context, force: forceRetry)
         let descriptor = FetchDescriptor<OutboxItem>(sortBy: [SortDescriptor(\OutboxItem.createdAt)])
         let now = Date.now
         let queue = try context.fetch(descriptor)
@@ -1254,7 +1559,33 @@ enum EdgeFlowSyncService {
     /// Historical items often got stuck as NEEDS_REVIEW (401 before device login)
     /// or UPLOADING/REGISTERING if the app was interrupted mid-sync. Requeue them once
     /// the device is online so "立即同步" can drain the backlog.
-    private static func reclaimRetriableItems(in context: ModelContext) {
+    private static func healMissingOutboxItems(in context: ModelContext) {
+        guard let events = try? context.fetch(FetchDescriptor<LocalEvent>()),
+              let outboxItems = try? context.fetch(FetchDescriptor<OutboxItem>()) else { return }
+        let existingIDs = Set(outboxItems.map(\.eventID))
+        var changed = false
+        for event in events where event.syncStateRaw != SyncState.synced.rawValue && !existingIDs.contains(event.eventID) {
+            context.insert(OutboxItem(eventID: event.eventID, kind: event.kind, bodyJSON: event.payloadJSON))
+            changed = true
+        }
+        if changed { try? context.save() }
+    }
+
+    private static func healStaleEventSyncState(in context: ModelContext) {
+        guard let events = try? context.fetch(FetchDescriptor<LocalEvent>()),
+              let outboxItems = try? context.fetch(FetchDescriptor<OutboxItem>()) else { return }
+        let pendingOutbox = outboxItems.filter { $0.state != .synced && $0.state != .abandoned }
+        var changed = false
+        for item in pendingOutbox {
+            guard let event = events.first(where: { $0.eventID == item.eventID }),
+                  event.syncStateRaw == SyncState.synced.rawValue else { continue }
+            event.syncStateRaw = SyncState.queued.rawValue
+            changed = true
+        }
+        if changed { try? context.save() }
+    }
+
+    private static func reclaimRetriableItems(in context: ModelContext, force: Bool = false) {
         let descriptor = FetchDescriptor<OutboxItem>()
         guard let items = try? context.fetch(descriptor) else { return }
         var changed = false
@@ -1265,15 +1596,25 @@ enum EdgeFlowSyncService {
                 item.nextRetryAt = nil
                 changed = true
             case .needsReview:
-                // Device is online now; give historical backlog another chance.
-                // Permanent problems (missing local media, bad payload) will fall back to needsReview.
                 if item.lastError?.contains("本地媒体文件已不存在") == true {
                     continue
                 }
                 item.state = .queued
                 item.nextRetryAt = nil
                 changed = true
+            case .failed, .conflict where force:
+                if item.lastError?.contains("本地媒体文件已不存在") == true {
+                    continue
+                }
+                item.state = .queued
+                item.nextRetryAt = nil
+                item.lastError = nil
+                changed = true
             default:
+                if force, item.state != .synced, item.state != .abandoned {
+                    item.nextRetryAt = nil
+                    changed = true
+                }
                 continue
             }
         }
@@ -1294,69 +1635,92 @@ enum EdgeFlowSyncService {
         item.state = .uploading
         try context.save()
         let payload = (try? JSONSerialization.jsonObject(with: Data(event.payloadJSON.utf8)) as? [String: Any]) ?? [:]
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "eventId": event.eventID,
             "eventType": eventType(for: event.kind),
             "taskId": draft.taskID,
-            "codeValue": event.codeValue ?? NSNull(),
-            "captureId": event.captureID ?? NSNull(),
+            "captureId": event.captureID ?? "",
             "terminalId": registration.terminalID,
             "deviceId": registration.terminalID,
             "occurredAt": ISO8601DateFormatter().string(from: event.occurredAt),
             "payload": payload,
         ]
-        _ = try await EdgeFlowClient.post("/api/terminal/v1/events", body: body, idempotencyKey: event.eventID)
-        event.syncStateRaw = SyncState.synced.rawValue
-
-        if event.kind == "capture.completed", let captureID = event.captureID {
-            ExecutionListService.markSynced(for: captureID, in: context)
+        if let codeValue = event.codeValue, !codeValue.isEmpty {
+            body["codeValue"] = codeValue
+        }
+        try await performWithCredentialRecovery(registration: registration, in: context) {
+            _ = try await EdgeFlowClient.post("/api/terminal/v1/events", body: body, idempotencyKey: event.eventID)
         }
 
         if let mediaID = payload["mediaId"] as? String {
             let mediaIdentifier = mediaID
             let mediaDescriptor = FetchDescriptor<LocalMedia>(predicate: #Predicate { $0.mediaID == mediaIdentifier })
             if let media = try context.fetch(mediaDescriptor).first {
-                try await upload(media, event: event, draft: draft, registration: registration)
+                try await upload(media, event: event, draft: draft, registration: registration, in: context)
                 media.syncState = .synced
             }
+        }
+
+        event.syncStateRaw = SyncState.synced.rawValue
+        if event.kind == "capture.completed", let captureID = event.captureID {
+            ExecutionListService.markSynced(for: captureID, in: context)
         }
         item.state = .synced
         item.lastError = nil
         try context.save()
     }
 
-    private static func upload(_ media: LocalMedia, event: LocalEvent, draft: TaskDraft, registration: DeviceRegistration) async throws {
+    private static func performWithCredentialRecovery<T>(
+        registration: DeviceRegistration,
+        in context: ModelContext,
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch let error as EdgeFlowServiceError {
+            guard case .rejected(let status, _) = error, status == 401 || status == 403 else { throw error }
+            guard try await DeviceRegistrationService.refreshCredentials(registration, in: context) else { throw error }
+            return try await operation()
+        }
+    }
+
+    private static func upload(_ media: LocalMedia, event: LocalEvent, draft: TaskDraft, registration: DeviceRegistration, in context: ModelContext) async throws {
         media.syncState = .uploading
         MediaFileStore.healStoredPaths(for: media)
         guard let fileURL = media.resolvedOriginalURL else { throw EdgeFlowServiceError.localMediaMissing }
         let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        let ticket = try await EdgeFlowClient.post("/api/terminal/v1/media/upload-ticket", body: [
-            "mediaId": media.mediaID,
-            "eventId": event.eventID,
-            "taskId": draft.taskID,
-            "codeValue": event.codeValue ?? NSNull(),
-            "captureId": event.captureID ?? NSNull(),
-            "terminalId": registration.terminalID,
-            "deviceId": registration.terminalID,
-            "mediaType": media.mediaType,
-            "category": media.category,
-            "checksum": media.checksum,
-            "fileSize": size,
-            "capturedAt": ISO8601DateFormatter().string(from: media.capturedAt),
-            "location": locationPayload(for: media),
-        ], idempotencyKey: media.mediaID)
+        guard size > 0 else { throw EdgeFlowServiceError.localMediaMissing }
+        let ticket = try await performWithCredentialRecovery(registration: registration, in: context) {
+            try await EdgeFlowClient.post(
+                "/api/terminal/v1/media/upload-ticket",
+                body: mediaTicketBody(media: media, event: event, draft: draft, registration: registration, size: size),
+                idempotencyKey: media.mediaID
+            )
+        }
+        if let policy = ticket["thumbnailPolicy"] as? [String: Any] {
+            MediaFileStore.applyThumbnailPolicy(policy)
+        }
         guard let uploadURLText = ticket["uploadUrl"] as? String, let uploadURL = URL(string: uploadURLText) else {
             throw EdgeFlowServiceError.missingUploadURL
         }
-        let headers = (ticket["headers"] as? [String: Any] ?? ticket["uploadHeaders"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
-        try await EdgeFlowClient.upload(fileURL: fileURL, to: uploadURL, method: (ticket["method"] as? String) ?? "PUT", headers: headers)
+        let resolvedURL = resolvedUploadURL(uploadURL, storageProvider: ticket["storageProvider"] as? String)
+        let headers = uploadHeaders(
+            from: ticket,
+            uploadURL: resolvedURL,
+            storageProvider: ticket["storageProvider"] as? String
+        )
+        try await EdgeFlowClient.upload(
+            fileURL: fileURL,
+            to: resolvedURL,
+            method: (ticket["method"] as? String) ?? "PUT",
+            headers: headers
+        )
         media.syncState = .registering
-        _ = try await EdgeFlowClient.post("/api/terminal/v1/media/\(media.mediaID)/complete", body: [
+        var completeBody: [String: Any] = [
             "mediaId": media.mediaID,
             "eventId": event.eventID,
             "taskId": draft.taskID,
-            "codeValue": event.codeValue ?? NSNull(),
-            "captureId": event.captureID ?? NSNull(),
+            "captureId": event.captureID ?? "",
             "mediaType": media.mediaType,
             "category": media.category,
             "objectKey": (ticket["objectKey"] as? String) ?? "",
@@ -1365,7 +1729,83 @@ enum EdgeFlowSyncService {
             "fileSize": size,
             "capturedAt": ISO8601DateFormatter().string(from: media.capturedAt),
             "location": locationPayload(for: media),
-        ], idempotencyKey: media.mediaID)
+        ]
+        if let codeValue = event.codeValue, !codeValue.isEmpty {
+            completeBody["codeValue"] = codeValue
+        }
+        _ = try await performWithCredentialRecovery(registration: registration, in: context) {
+            try await EdgeFlowClient.post("/api/terminal/v1/media/\(media.mediaID)/complete", body: completeBody, idempotencyKey: media.mediaID)
+        }
+        if let thumbnailURL = media.resolvedThumbnailURL,
+           let thumbnailData = try? Data(contentsOf: thumbnailURL), !thumbnailData.isEmpty {
+            try? await performWithCredentialRecovery(registration: registration, in: context) {
+                try await EdgeFlowClient.uploadMultipart(
+                    path: "/api/terminal/v1/media/\(media.mediaID)/thumbnail",
+                    fileData: thumbnailData,
+                    fileName: "\(media.mediaID)-thumb.jpg",
+                    contentType: "image/jpeg",
+                    token: .device
+                )
+            }
+        }
+    }
+
+    private static func uploadHeaders(from ticket: [String: Any], uploadURL: URL, storageProvider: String?) -> [String: String] {
+        (ticket["headers"] as? [String: Any] ?? ticket["uploadHeaders"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+    }
+
+    private static func mediaTicketBody(
+        media: LocalMedia,
+        event: LocalEvent,
+        draft: TaskDraft,
+        registration: DeviceRegistration,
+        size: Int
+    ) -> [String: Any] {
+        var body: [String: Any] = [
+            "mediaId": media.mediaID,
+            "eventId": event.eventID,
+            "taskId": draft.taskID,
+            "captureId": event.captureID ?? "",
+            "terminalId": registration.terminalID,
+            "deviceId": registration.terminalID,
+            "mediaType": media.mediaType,
+            "mimeType": mimeType(for: media),
+            "category": media.category,
+            "checksum": media.checksum,
+            "fileSize": size,
+            "capturedAt": ISO8601DateFormatter().string(from: media.capturedAt),
+            "location": locationPayload(for: media),
+        ]
+        if let codeValue = event.codeValue, !codeValue.isEmpty {
+            body["codeValue"] = codeValue
+        }
+        return body
+    }
+
+    private static func mimeType(for media: LocalMedia) -> String {
+        switch media.mediaType {
+        case "video": "video/quicktime"
+        default: "image/jpeg"
+        }
+    }
+
+    private static func resolvedUploadURL(_ uploadURL: URL, storageProvider: String?) -> URL {
+        let provider = (storageProvider ?? "").uppercased()
+        let isDirectUpload = provider == "EDGEFLOW_DIRECT" || uploadURL.path.contains("/media/direct/")
+        guard isDirectUpload,
+              let base = EdgeFlowClient.baseURL,
+              var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false),
+              let baseComponents = URLComponents(url: base, resolvingAgainstBaseURL: false),
+              let uploadHost = components.host?.lowercased(),
+              let baseHost = baseComponents.host?.lowercased() else {
+            return uploadURL
+        }
+        let loopbackHosts = ["127.0.0.1", "localhost", "0.0.0.0"]
+        guard loopbackHosts.contains(uploadHost) || uploadHost != baseHost else { return uploadURL }
+        components.scheme = baseComponents.scheme
+        components.host = baseComponents.host
+        components.port = baseComponents.port
+        return components.url ?? uploadURL
     }
 
     private static func locationPayload(for media: LocalMedia) -> [String: Any] {

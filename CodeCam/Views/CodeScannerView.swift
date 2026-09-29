@@ -21,6 +21,13 @@ struct CodeScannerView: View {
                         }
                         if lockToCenter {
                             ScanAimOverlay()
+                            VStack {
+                                Spacer()
+                                Text("将产品条形码置于框内")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color(red: 191 / 255, green: 205 / 255, blue: 221 / 255))
+                                    .padding(.bottom, 120)
+                            }
                         }
                     }
                     .ignoresSafeArea(edges: .bottom)
@@ -188,7 +195,9 @@ private struct LiveCodeScanner: UIViewControllerRepresentable {
             guard let best = candidates.min(by: { $0.distance < $1.distance }) else { return }
             hasScanned = true
             dataScanner.stopScanning()
-            onScan(best.value)
+            DispatchQueue.main.async {
+                self.onScan(best.value)
+            }
         }
 
         private func midpoint(of bounds: RecognizedItem.Bounds) -> CGPoint {
